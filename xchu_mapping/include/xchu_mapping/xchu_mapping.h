@@ -37,7 +37,7 @@
 #include <ctime>
 #include <deque>
 #include <mutex>
-
+#include <queue>
 using PointI = pcl::PointXYZI;
 
 struct pose {
@@ -254,9 +254,9 @@ class LidarMapping {
 
   // mutex
   std::mutex mutex_lock;
-  std::deque<sensor_msgs::Imu> imuBuf;
-  std::deque<sensor_msgs::PointCloud2> cloudBuf;
-  std::deque<nav_msgs::Odometry> odomBuf;
+  std::queue<sensor_msgs::Imu> imuBuf;
+  std::queue<sensor_msgs::PointCloud2> cloudBuf;
+  std::queue<nav_msgs::Odometry> odomBuf;
 };
 
 #endif //NDT_MAPPING_LIDARMAPPING_H

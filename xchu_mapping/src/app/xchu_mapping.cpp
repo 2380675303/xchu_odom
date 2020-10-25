@@ -236,14 +236,14 @@ void LidarMapping::param_initial(ros::NodeHandle &privateHandle) {
 }
 
 void LidarMapping::run() {
-  std::deque<sensor_msgs::Imu> imu_data_buff;
-  std::deque<nav_msgs::Odometry> odom_data_buff;
-  std::deque<sensor_msgs::PointCloud2> cloud_data_buff;
+//  std::deque<sensor_msgs::Imu> imu_data_buff;
+//  std::deque<nav_msgs::Odometry> odom_data_buff;
+//  std::deque<sensor_msgs::PointCloud2> cloud_data_buff;
 
   ros::Rate rate(100);
   while (ros::ok()) {
     ros::spinOnce();
-//    rate.sleep();
+    rate.sleep();
 
     // 往buffer中装数据
 
@@ -255,55 +255,76 @@ void LidarMapping::run() {
 //      odom_data_buff.insert(odom_data_buff.end(), odomBuf.begin(), odomBuf.end());
 //      odomBuf.clear();
 //    }
-    mutex_lock.lock();
-    if (cloudBuf.size() > 0) {
-      cloud_data_buff.insert(cloud_data_buff.end(), cloudBuf.begin(), cloudBuf.end());
-      cloudBuf.clear();
-    }
-    mutex_lock.unlock();
+//    mutex_lock.lock();
+//    if (cloudBuf.size() > 0) {
+//      cloud_data_buff.insert(cloud_data_buff.end(), cloudBuf.begin(), cloudBuf.end());
+//      cloudBuf.clear();
+//    }
+//    mutex_lock.unlock();
 
 //    std::cout << "cloud imu odom buffer size : " << cloud_data_buff.size() << ", " << imu_data_buff.size()
 //              << ", " << odom_data_buff.size() << std::endl;
 
-    while (cloud_data_buff.size() > 0) {
-      sensor_msgs::PointCloud2 cloud_msg = cloud_data_buff.front(); //  处理先进来的数据
-      const auto cloud_time = cloud_msg.header.stamp;
-      cloud_data_buff.pop_front();
-
-      /*  sensor_msgs::Imu imu_msg;
-        ros::Time imu_time;
-        if (imu_data_buff.size() > 0 && _use_imu) {
-          imu_msg = imu_data_buff.front();
-          imu_time = imu_msg.header.stamp;
-          imu_data_buff.pop_front();
-          imu_info(imu_msg);
-        }
-        nav_msgs::Odometry odom_msg;
-        ros::Time odom_time;
-        if (odom_data_buff.size() > 0 && _use_odom) {
-          odom_msg = odom_data_buff.front();
-          odom_time = imu_msg.header.stamp;
-          odom_data_buff.pop_front();
-          odom_info(odom_msg);
-        }
-
-        if (imu_data_buff.size() > 10000 || odom_data_buff.size() > 5000) {
-          imu_data_buff.clear();
-          odom_data_buff.clear();
-        }*/
-
+//    while (1) {
+    if (!cloudBuf.empty()) {
+      //read data
+      mutex_lock.lock();
       pcl::PointCloud<pcl::PointXYZI> tmp;
-      pcl::fromROSMsg(cloud_msg, tmp);
+      pcl::fromROSMsg(cloudBuf.front(), tmp);
+      ros::Time current_scan_time = (cloudBuf.front()).header.stamp;
+      cloudBuf.pop(); // pop掉
+      mutex_lock.unlock();
+      // 取queue里面的第一条数据
+
+
       if (tmp.empty()) {
         ROS_ERROR("Scan is empty !!!");
         continue;
       }
       std::vector<int> indices;   //remove NAN
       pcl::removeNaNFromPointCloud(tmp, tmp, indices);
-      ros::Time current_scan_time = cloud_msg.header.stamp;
-
       process_cloud(tmp, current_scan_time);
     }
+//    }
+//      while (cloud_data_buff.size() > 0) {
+//        sensor_msgs::PointCloud2 cloud_msg = cloud_data_buff.front(); //  处理先进来的数据
+//        const auto cloud_time = cloud_msg.header.stamp;
+//        cloud_data_buff.pop_front();
+//
+//        /*  sensor_msgs::Imu imu_msg;
+//          ros::Time imu_time;
+//          if (imu_data_buff.size() > 0 && _use_imu) {
+//            imu_msg = imu_data_buff.front();
+//            imu_time = imu_msg.header.stamp;
+//            imu_data_buff.pop_front();
+//            imu_info(imu_msg);
+//          }
+//          nav_msgs::Odometry odom_msg;
+//          ros::Time odom_time;
+//          if (odom_data_buff.size() > 0 && _use_odom) {
+//            odom_msg = odom_data_buff.front();
+//            odom_time = imu_msg.header.stamp;
+//            odom_data_buff.pop_front();
+//            odom_info(odom_msg);
+//          }
+//
+//          if (imu_data_buff.size() > 10000 || odom_data_buff.size() > 5000) {
+//            imu_data_buff.clear();
+//            odom_data_buff.clear();
+//          }*/
+//
+//        pcl::PointCloud<pcl::PointXYZI> tmp;
+//        pcl::fromROSMsg(cloud_msg, tmp);
+//        if (tmp.empty()) {
+//          ROS_ERROR("Scan is empty !!!");
+//          continue;
+//        }
+//        std::vector<int> indices;   //remove NAN
+//        pcl::removeNaNFromPointCloud(tmp, tmp, indices);
+//        ros::Time current_scan_time = cloud_msg.header.stamp;
+//
+//        process_cloud(tmp, current_scan_time);
+//      }
   }
 
   // 关闭终端时保存地图
@@ -724,7 +745,7 @@ void LidarMapping::imu_callback(const sensor_msgs::Imu::Ptr &input) {
     imuUpSideDown(input);
 
 //  mutex_lock.lock();
-  imuBuf.push_back(*input);
+  imuBuf.push(*input);
 //  mutex_lock.unlock();
 
   /*const ros::Time current_time = input->header.stamp;
@@ -777,13 +798,13 @@ void LidarMapping::odom_callback(const nav_msgs::Odometry::ConstPtr &input) {
 //  odom_calc(input->header.stamp);
 
 //  mutex_lock.lock();
-  odomBuf.push_back(*input);
+  odomBuf.push(*input);
 //  mutex_lock.unlock();
 }
 
 void LidarMapping::points_callback(const sensor_msgs::PointCloud2::ConstPtr &input) {
   mutex_lock.lock();
-  cloudBuf.push_back(*input);
+  cloudBuf.push(*input);
   mutex_lock.unlock();
 }
 
