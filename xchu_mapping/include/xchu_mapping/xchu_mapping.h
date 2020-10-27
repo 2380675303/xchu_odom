@@ -121,7 +121,14 @@ class LidarMapping {
    */
   void process_cloud(const pcl::PointCloud<pcl::PointXYZI> &input, const ros::Time &current_scan_time);
 
+
+
   void param_initial(ros::NodeHandle &private_handle);
+
+  /**
+   * 保存地图及其他点云
+   */
+  void save_map();
 
   void imu_callback(const sensor_msgs::Imu::Ptr &input);
 
@@ -201,9 +208,8 @@ class LidarMapping {
   double current_velocity_imu_y;
   double current_velocity_imu_z;
 
-  pcl::PointCloud<pcl::PointXYZI> map, globalmap;  // 此处定义地图  --global map
+  pcl::PointCloud<pcl::PointXYZI> localmap, globalmap;  // 此处定义地图  --global map
   pcl::PointCloud<pcl::PointXYZI> submap;  // 此处定义地图  --global map
-  pcl::PointCloud<pcl::PointXYZI> dense_map;  // 此处定义地图  --global map
 
   pcl::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI> pcl_ndt;
   cpu::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI> cpu_ndt;  // cpu方式  --可以直接调用吗??可以

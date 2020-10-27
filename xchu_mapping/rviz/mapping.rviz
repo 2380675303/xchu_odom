@@ -6,7 +6,8 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
-        - /ndt_map1
+        - /smartcar1
+        - /current_points1
         - /Odometry1/Shape1
         - /Odometry1/Covariance1
       Splitter Ratio: 0.524017453
@@ -70,41 +71,19 @@ Visualization Manager:
       Value: false
       Visual Enabled: true
     - Class: rviz/TF
-      Enabled: true
+      Enabled: false
       Frame Timeout: 15
       Frames:
         All Enabled: true
-        base_link:
-          Value: true
-        camera_color_left:
-          Value: true
-        camera_color_right:
-          Value: true
-        camera_gray_left:
-          Value: true
-        camera_gray_right:
-          Value: true
-        imu_link:
-          Value: true
-        map:
-          Value: true
-        velo_link:
-          Value: true
-        velodyne:
-          Value: true
-        world:
-          Value: true
       Marker Scale: 5
       Name: TF
       Show Arrows: true
       Show Axes: true
       Show Names: true
       Tree:
-        world:
-          map:
-            {}
+        {}
       Update Interval: 0
-      Value: true
+      Value: false
     - Alpha: 0.100000001
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -138,14 +117,14 @@ Visualization Manager:
     - Alpha: 0.800000012
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 3.41503143
-        Min Value: -8.55699635
+        Max Value: 2.95536733
+        Min Value: -18.3158665
         Value: true
       Axis: Z
       Channel Name: intensity
       Class: rviz/PointCloud2
-      Color: 255; 255; 255
-      Color Transformer: AxisColor
+      Color: 255; 0; 0
+      Color Transformer: FlatColor
       Decay Time: 0
       Enabled: true
       Invert Rainbow: false
@@ -156,7 +135,7 @@ Visualization Manager:
       Name: current_points
       Position Transformer: XYZ
       Queue Size: 10
-      Selectable: true
+      Selectable: false
       Size (Pixels): 2
       Size (m): 0.00999999978
       Style: Points
@@ -165,11 +144,11 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
-    - Alpha: 1
+    - Alpha: 0.5
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 2.82500005
-        Min Value: -11.5550003
+        Max Value: 3.44971967
+        Min Value: -13.1845293
         Value: true
       Axis: Z
       Channel Name: intensity
@@ -187,9 +166,9 @@ Visualization Manager:
       Position Transformer: XYZ
       Queue Size: 10
       Selectable: true
-      Size (Pixels): 3
+      Size (Pixels): 1
       Size (m): 0.0799999982
-      Style: Flat Squares
+      Style: Points
       Topic: /local_map
       Unreliable: false
       Use Fixed Frame: true
@@ -224,7 +203,7 @@ Visualization Manager:
         Head Length: 0.5
         Head Radius: 0.100000001
         Shaft Length: 1
-        Shaft Radius: 1
+        Shaft Radius: 0.5
         Value: Arrow
       Topic: /current_odom
       Unreliable: false
@@ -253,7 +232,7 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Angle: -0.615000248
+      Angle: 0.314999789
       Class: rviz/TopDownOrtho
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.0599999987
@@ -263,11 +242,11 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Scale: 6.74892473
+      Scale: 3.68347216
       Target Frame: base_link
       Value: TopDownOrtho (rviz)
-      X: 39.4121094
-      Y: -10.7242594
+      X: 108.495041
+      Y: 26.0444527
     Saved: ~
 Window Geometry:
   Displays:
