@@ -127,7 +127,6 @@ void LidarMapping::param_initial(ros::NodeHandle &privateHandle) {
     std::cout << ">> Use OMP NDT <<" << std::endl;
     pclomp::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI>::Ptr ndt(
         new pclomp::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI>());
-
     ndt->setNeighborhoodSearchMethod(pclomp::DIRECT7);
     //ndt->setNumThreads(omp_get_num_threads());  //  设置最大线程, 注意：需要引入头文件omp.h
     ndt->setTransformationEpsilon(trans_eps);
@@ -249,6 +248,21 @@ void LidarMapping::run() {
       cloudBuf.pop(); // pop掉
       mutex_lock.unlock();
 
+      // 应该去查询最近的imu数据并清空
+      if(_use_imu){
+        std::lock_guard<std::mutex> lock(imu_data_mutex);
+        auto imu_iter = imu_data.begin();
+        for (imu_iter; imu_iter != imu_data.end(); imu_iter++) {
+          if (current_scan_time < (*imu_iter)->header.stamp) {
+            break;
+          }
+          sensor_msgs::ImuConstPtr data = (*imu_iter);
+          imu_info(*data);
+        }
+        imu_data.erase(imu_data.begin(), imu_iter);
+      }
+      std::cout << "imu buffer size : " << imu_data.size() << std::endl;
+
       // 取queue里面的第一条数据
       if (tmp.empty()) {
         ROS_ERROR("Scan is empty !!!");
@@ -303,7 +317,7 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &tmp, con
   ros::Time test_time_2 = ros::Time::now();
 
   // map_ptr是map的一个指针
-  // TODO:即map_ptr只是指向map,而并不是将map进行了拷贝
+  // TODO:即localmap_ptr只是指向map,而并不是将localmap_ptr进行了拷贝
   pcl::PointCloud<pcl::PointXYZI>::Ptr
       localmap_ptr(new pcl::PointCloud<pcl::PointXYZI>(localmap));  // 重要作用,用以保存降采样后的全局地图
 
@@ -581,10 +595,12 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &tmp, con
 
   // start5
   // 实时的点云也发布
-  sensor_msgs::PointCloud2::Ptr pointcloud_current_ptr(new sensor_msgs::PointCloud2);
-  pcl::toROSMsg(*transformed_scan_ptr, *pointcloud_current_ptr);
-  pointcloud_current_ptr->header.frame_id = "map";
-  current_points_pub.publish(*pointcloud_current_ptr);
+  if (current_points_pub.getNumSubscribers() > 0) {
+    sensor_msgs::PointCloud2::Ptr pointcloud_current_ptr(new sensor_msgs::PointCloud2);
+    pcl::toROSMsg(*transformed_scan_ptr, *pointcloud_current_ptr);
+    pointcloud_current_ptr->header.frame_id = "map";
+    current_points_pub.publish(*pointcloud_current_ptr);
+  }
 
   // 发布globalmap
   pcl::PointCloud<pcl::PointXYZI>::Ptr target_cloud(new pcl::PointCloud<pcl::PointXYZI>());
@@ -593,39 +609,46 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &tmp, con
   map_grid_filter.setLeafSize(0.5, 0.5, 0.5);
   map_grid_filter.setInputCloud(target_cloud);
   map_grid_filter.filter(*target_cloud);
-  sensor_msgs::PointCloud2::Ptr map_msg_ptr(new sensor_msgs::PointCloud2);
-  pcl::toROSMsg(*target_cloud, *map_msg_ptr);
-  //  pcl::toROSMsg(globalmap, *map_msg_ptr);
-  map_msg_ptr->header.frame_id = "map";
-  ndt_map_pub.publish(*map_msg_ptr);
+
+  if (ndt_map_pub.getNumSubscribers() > 0) {
+    sensor_msgs::PointCloud2::Ptr map_msg_ptr(new sensor_msgs::PointCloud2);
+    pcl::toROSMsg(*target_cloud, *map_msg_ptr);
+    //  pcl::toROSMsg(globalmap, *map_msg_ptr);
+    map_msg_ptr->header.frame_id = "map";
+    ndt_map_pub.publish(*map_msg_ptr);
+  }
   target_cloud->clear();
 
-  // localmap
-  sensor_msgs::PointCloud2::Ptr localmap_msg_ptr(new sensor_msgs::PointCloud2);
-  pcl::toROSMsg(localmap, *localmap_msg_ptr);
-  localmap_msg_ptr->header.frame_id = "map";
-  local_map_pub.publish(*localmap_msg_ptr);
+  if (local_map_pub.getNumSubscribers() > 0) {
+    // localmap
+    sensor_msgs::PointCloud2::Ptr localmap_msg_ptr(new sensor_msgs::PointCloud2);
+    pcl::toROSMsg(localmap, *localmap_msg_ptr);
+    localmap_msg_ptr->header.frame_id = "map";
+    local_map_pub.publish(*localmap_msg_ptr);
+  }
 
-  // publish odom
-  nav_msgs::Odometry odom;
-  odom.header.stamp = current_scan_time;
-  odom.header.frame_id = "map";
+  if (current_odom_pub.getNumSubscribers()) {
+    // publish odom
+    nav_msgs::Odometry odom;
+    odom.header.stamp = current_scan_time;
+    odom.header.frame_id = "map";
 
-  odom.pose.pose.position.x = current_pose.x;
-  odom.pose.pose.position.y = current_pose.y;
-  odom.pose.pose.position.z = current_pose.z;
+    odom.pose.pose.position.x = current_pose.x;
+    odom.pose.pose.position.y = current_pose.y;
+    odom.pose.pose.position.z = current_pose.z;
 
-  odom.pose.pose.orientation.x = q.x();
-  odom.pose.pose.orientation.y = q.y();
-  odom.pose.pose.orientation.z = q.z();
-  odom.pose.pose.orientation.w = q.w();
+    odom.pose.pose.orientation.x = q.x();
+    odom.pose.pose.orientation.y = q.y();
+    odom.pose.pose.orientation.z = q.z();
+    odom.pose.pose.orientation.w = q.w();
 
-  odom.child_frame_id = "base_link";
-  odom.twist.twist.linear.x = current_velocity_x;
-  odom.twist.twist.linear.y = current_velocity_y;
-  odom.twist.twist.angular.z = current_velocity_z;
+    odom.child_frame_id = "base_link";
+    odom.twist.twist.linear.x = current_velocity_x;
+    odom.twist.twist.linear.y = current_velocity_y;
+    odom.twist.twist.angular.z = current_velocity_z;
 
-  current_odom_pub.publish(odom);
+    current_odom_pub.publish(odom);
+  }
 
   ros::Time test_time_6 = ros::Time::now();
   // end5
@@ -654,7 +677,6 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &tmp, con
   std::cout << "4-5: " << (test_time_5 - test_time_4) << "ms" << "--get current pose" << std::endl;
   std::cout << "5-6: " << (test_time_6 - test_time_5) << "ms" << "--publish current pose" << std::endl;
   std::cout << "-----------------------------------------------------------------" << std::endl;
-
 }
 
 void LidarMapping::imu_callback(const sensor_msgs::Imu::Ptr &input) {
@@ -663,11 +685,14 @@ void LidarMapping::imu_callback(const sensor_msgs::Imu::Ptr &input) {
   if (_imu_upside_down)  // _imu_upside_down指示是否进行imu的正负变换
     imuUpSideDown(input);
 
-//  mutex_lock.lock();
-  //imuBuf.push(*input);
-//  mutex_lock.unlock();
+  std::lock_guard<std::mutex> lock(imu_data_mutex);
+  imu_data.push_back(input);
 
-  const ros::Time current_time = input->header.stamp;
+  //  mutex_lock.lock();
+  //imuBuf.push(*input);
+  //  mutex_lock.unlock();
+
+  /*const ros::Time current_time = input->header.stamp;
   static ros::Time previous_time = current_time;
   const double diff_time = (current_time - previous_time).toSec();
 
@@ -709,7 +734,7 @@ void LidarMapping::imu_callback(const sensor_msgs::Imu::Ptr &input) {
   previous_time = current_time;
   previous_imu_roll = imu_roll;
   previous_imu_pitch = imu_pitch;
-  previous_imu_yaw = imu_yaw;
+  previous_imu_yaw = imu_yaw;*/
 }
 
 void LidarMapping::odom_callback(const nav_msgs::Odometry::ConstPtr &input) {
@@ -866,7 +891,7 @@ void LidarMapping::imuUpSideDown(const sensor_msgs::Imu::Ptr input) {
   input_pitch *= -1;
   input_yaw *= -1;
 
-//        input_yaw += M_PI/2;
+//  input_yaw += M_PI/2;
   input->orientation = tf::createQuaternionMsgFromRollPitchYaw(input_roll, input_pitch, input_yaw);
 }
 
@@ -920,6 +945,7 @@ void LidarMapping::imu_info(const sensor_msgs::Imu &input) {
 void LidarMapping::odom_info(const nav_msgs::Odometry &input) {
   odom_calc(input.header.stamp);
 }
+
 void LidarMapping::save_map() {
   // 关闭终端时保存地图
   std::stringstream ss;

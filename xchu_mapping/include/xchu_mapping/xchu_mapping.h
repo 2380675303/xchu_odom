@@ -38,7 +38,7 @@
 #include <deque>
 #include <mutex>
 #include <queue>
-using PointI = pcl::PointXYZI;
+using PointT = pcl::PointXYZI;
 
 struct pose {
   double x;
@@ -121,8 +121,6 @@ class LidarMapping {
    */
   void process_cloud(const pcl::PointCloud<pcl::PointXYZI> &input, const ros::Time &current_scan_time);
 
-
-
   void param_initial(ros::NodeHandle &private_handle);
 
   /**
@@ -152,7 +150,11 @@ class LidarMapping {
   pose previous_pose, guess_pose, guess_pose_imu, guess_pose_odom, guess_pose_imu_odom;
   pose current_pose, current_pose_imu, current_pose_odom, current_pose_imu_odom;
   pose ndt_pose, localizer_pose;
-  pose added_pose;  // added_pose记录点云加入地图时候的位置  // 初始设为0即可,因为第一帧如论如何也要加入地图的
+  pose added_pose;  //  added_pose记录点云加入地图时候的位置         // 初始设为0即可,因为第一帧如论如何也要加入地图的
+
+  Eigen::Matrix4f pre_pose_, guess_pose_, guess_pose_imu_, guess_pose_odom_, guess_pose_imu_odom_;
+  Eigen::Matrix4f current_pose_, current_pose_imu_, current_pose_odom_, current_pose_imu_odom_;
+  Eigen::Matrix4f ndt_pose_, localizer_pose_, added_pose_;
 
   ros::Time current_scan_time;
   ros::Time previous_scan_time;
@@ -162,9 +164,9 @@ class LidarMapping {
   ros::Publisher ndt_map_pub;        // 地图发布
   ros::Publisher local_map_pub;        // 地图发布
   ros::Publisher current_odom_pub;        // 地图发布
-  ros::Publisher current_pose_pub;   // 位置发布
-  ros::Publisher guess_pose_linaer_pub;  // TODO:这是个啥发布????
-  ros::Publisher current_points_pub, path_pub;  // TODO:这是个啥发布????
+  //ros::Publisher current_pose_pub;   // 位置发布
+  //ros::Publisher guess_pose_linaer_pub;  // TODO:这是个啥发布????
+  ros::Publisher current_points_pub;  // TODO:这是个啥发布????
 
 
   ros::Subscriber points_sub;
@@ -263,6 +265,11 @@ class LidarMapping {
   std::queue<sensor_msgs::Imu> imuBuf;
   std::queue<sensor_msgs::PointCloud2> cloudBuf;
   std::queue<nav_msgs::Odometry> odomBuf;
+
+
+  // imu input buffer
+  std::mutex imu_data_mutex;
+  std::vector<sensor_msgs::ImuConstPtr> imu_data;
 };
 
 #endif //NDT_MAPPING_LIDARMAPPING_H
