@@ -1,6 +1,14 @@
 # xchu_odom
 基于NDT算法的激光里程计，参考autoware、ndt_omp
 
+## 使用
+
+![image-20210119115558277](README/image-20210119115558277.png)
+
+
+
+## 测试结果
+
 kitti测试结果，全长3700m，路口基本对齐，偏移量较小。
 
 ![image-20201027024048000](README/image-20201027024048000.png)
