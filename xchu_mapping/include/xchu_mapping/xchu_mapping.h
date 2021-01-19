@@ -10,13 +10,17 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <ctime>
+#include <deque>
+#include <mutex>
+#include <queue>
+
 #include <nav_msgs/Path.h>
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/Imu.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <std_msgs/Float32.h>
 #include <std_msgs/Bool.h>
-
 #include <tf/transform_broadcaster.h>
 #include <tf/transform_datatypes.h>
 
@@ -28,16 +32,9 @@
 
 #include <pcl/registration/ndt.h>
 #include <ndt_cpu/NormalDistributionsTransform.h>
-//#ifdef CUDA_FOUND
-//#include <ndt_gpu/NormalDistributionsTransform.h>
-//#endif
-#include <pcl_omp_registration/ndt.h>  // if USE_PCL_OPENMP
 #include <pclomp/ndt_omp.h>
 #include "omp.h"
-#include <ctime>
-#include <deque>
-#include <mutex>
-#include <queue>
+
 using PointT = pcl::PointXYZI;
 
 struct pose {
@@ -68,20 +65,17 @@ enum class MethodType {
   use_cpu = 1,
   use_gpu = 2,
   use_omp = 3,
-  use_gpu_ptr = 4,
 };
 
 static MethodType _method_type = MethodType::use_cpu;  // 默认使用cpu运算
 
 static bool _incremental_voxel_update = false;
-
 static ros::Time callback_start, callback_end, t1_start, t1_end, t2_start, t2_end, t3_start, t3_end, ndt_start, ndt_end,
     t5_start, t5_end;
 static ros::Duration d_callback, d1, d2, d3, d4, d5;
-
 static int submap_num = 0;
-static double submap_size = 0.0;
-static double max_submap_size, odom_size;
+static double localmap_size = 0.0;
+static double max_localmap_size, odom_size;
 
 static pclomp::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI>::Ptr omp_ndt;
 
@@ -163,7 +157,7 @@ class LidarMapping {
   // 定义Publisher
   ros::Publisher ndt_map_pub;        // 地图发布
   ros::Publisher local_map_pub;        // 地图发布
-  ros::Publisher current_odom_pub;        // 地图发布
+  ros::Publisher current_odom_pub, keyposes_pub;        // 地图发布
   //ros::Publisher current_pose_pub;   // 位置发布
   //ros::Publisher guess_pose_linaer_pub;  // TODO:这是个啥发布????
   ros::Publisher current_points_pub;  // TODO:这是个啥发布????
@@ -191,7 +185,7 @@ class LidarMapping {
   std::ofstream ofs; // 写csv文件
   std::string filename;
 
-  MethodType _method_type;
+  MethodType _method_type = MethodType::use_cpu;
 
   // 定义各种差异值(两次采集数据之间的差异,包括点云位置差异,imu差异,odom差异,imu-odom差异)
   double diff;
@@ -241,16 +235,15 @@ class LidarMapping {
   double max_scan_range;
   double min_add_scan_shift;  // 定义将点云添加到locaMap里的最小间隔值  --应该是添加到localMap吧??
 
-  int initial_scan_loaded;
+  int initial_scan_loaded = 0;
 
   double _tf_x, _tf_y, _tf_z, _tf_roll, _tf_pitch, _tf_yaw;
   Eigen::Matrix4f tf_btol, tf_ltob;  // ?????
 
   // 重要变量参数 :: 用以指示是否使用imu,是否使用odom
-  bool _use_imu;
-  bool _use_odom;
-  bool _imu_upside_down;  // 用以解决坐标系方向(正负变换)问题 (比如x变更为-x等)
-
+  bool _use_imu = false;
+  bool _use_odom = false;
+  bool _imu_upside_down = false;  // 用以解决坐标系方向(正负变换)问题 (比如x变更为-x等)
 
   std::string _imu_topic;  // 定义imu消息的topic
   std::string _odom_topic;
@@ -258,7 +251,7 @@ class LidarMapping {
   std::string map_saved_dir;
 
   // end:private
-  ros::NodeHandle nh_, privateHandle;
+  ros::NodeHandle privateHandle;
 
   // mutex
   std::mutex mutex_lock;
@@ -266,10 +259,18 @@ class LidarMapping {
   std::queue<sensor_msgs::PointCloud2> cloudBuf;
   std::queue<nav_msgs::Odometry> odomBuf;
 
-
   // imu input buffer
   std::mutex imu_data_mutex;
   std::vector<sensor_msgs::ImuConstPtr> imu_data;
+
+  pcl::VoxelGrid<pcl::PointXYZI> downSizeFilterGlobalMap; // for global map visualization
+  pcl::VoxelGrid<pcl::PointXYZI> downSizeFilterKeyFrames; // for global map visualization
+  pcl::VoxelGrid<pcl::PointXYZI> downSizeFilterLocalmap; // for global map visualization
+  pcl::VoxelGrid<PointT> downSizeFilterSource;
+  //pcl::VoxelGrid<PointT> downSizeFilterHistoryKeyframes;
+
+  pcl::PointCloud<PointT>::Ptr cloud_keyposes_3d_;
+
 };
 
 #endif //NDT_MAPPING_LIDARMAPPING_H

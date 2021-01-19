@@ -1,7 +1,7 @@
 
 /**
  * @file xchu_mapping.cpp
- * @author xiangcheng hu (2022087641@qq.com)
+ * @author XCHU (2022087641@qq.com)
  * @brief
  * @version 1.0
  * @date 2020-09-20
@@ -12,15 +12,25 @@
 
 #include <xchu_mapping/xchu_mapping.h>
 
+int main(int argc, char **argv) {
+  ros::init(argc, argv, "xchu_mapping_node");
+
+  LidarMapping mapping;
+  mapping.run();
+
+  return 0;
+}
+
 LidarMapping::LidarMapping() : privateHandle("~") {
 
+  // 初始化参数
   param_initial(privateHandle);
 
-  ndt_map_pub = privateHandle.advertise<sensor_msgs::PointCloud2>("/ndt_map", 10);
+  ndt_map_pub = privateHandle.advertise<sensor_msgs::PointCloud2>("/global_map", 10);
   local_map_pub = privateHandle.advertise<sensor_msgs::PointCloud2>("/local_map", 10);
   current_points_pub = privateHandle.advertise<sensor_msgs::PointCloud2>("/current_points", 10);
-
   current_odom_pub = privateHandle.advertise<nav_msgs::Odometry>("/current_odom", 100);
+  keyposes_pub = privateHandle.advertise<sensor_msgs::PointCloud2>("/keyposes", 1);  // 关键帧点云
 
   points_sub = privateHandle.subscribe(_lidar_topic, 100, &LidarMapping::points_callback, this);
   odom_sub = privateHandle.subscribe(_odom_topic, 1000, &LidarMapping::odom_callback, this);
@@ -28,30 +38,6 @@ LidarMapping::LidarMapping() : privateHandle("~") {
 }
 
 void LidarMapping::param_initial(ros::NodeHandle &privateHandle) {
-
-  _method_type = MethodType::use_cpu;
-
-  // 定义各种差异值(两次采集数据之间的差异,包括点云位置差异,imu差异,odom差异,imu-odom差异)
-  diff = 0.0;
-  diff_x = diff_y = diff_z = 0.0;  // current_pose - previous_pose // 定义两帧点云差异值 --以确定是否更新点云等
-
-  // 定义速度值 --包括实际速度值,和imu取到的速度值
-  current_velocity_x = 0.0;
-  current_velocity_y = 0.0;
-  current_velocity_z = 0.0;
-
-  current_velocity_imu_x = 0.0;
-  current_velocity_imu_y = 0.0;
-  current_velocity_imu_z = 0.0;
-
-  Eigen::Matrix4f gnss_transform = Eigen::Matrix4f::Identity();  // 保存GPS信号的变量
-  _use_imu = false;
-  _use_odom = false;
-  _imu_upside_down = false;  // 用以解决坐标系方向(正负变换)问题 (比如x变更为-x等)
-  _incremental_voxel_update = false;  // ??????????
-  initial_scan_loaded = 0;  // 用以确定是否为第一帧点云(第一帧点云不做匹配,直接添加到地图中去)
-
-
   std::cout << "******************************************" << std::endl;
   privateHandle.param<float>("ndt_resolution", ndt_res, 1.0);
   privateHandle.param<double>("ndt_step_size", step_size, 0.1);
@@ -61,7 +47,7 @@ void LidarMapping::param_initial(ros::NodeHandle &privateHandle) {
   privateHandle.param<double>("min_scan_range", min_scan_range, 5);
   privateHandle.param<double>("max_scan_range", max_scan_range, 80);
   privateHandle.param<double>("min_add_scan_shift", min_add_scan_shift, 0.5);
-  privateHandle.param<double>("max_submap_size", max_submap_size, 400);
+  privateHandle.param<double>("max_submap_size", max_localmap_size, 400);
   privateHandle.param<std::string>("map_saved_dir", map_saved_dir, "");
 
   std::cout << "NDT_param_initial" << std::endl;
@@ -73,7 +59,7 @@ void LidarMapping::param_initial(ros::NodeHandle &privateHandle) {
   std::cout << "min_scan_range: " << min_scan_range << std::endl;
   std::cout << "max_scan_range: " << max_scan_range << std::endl;
   std::cout << "min_add_scan_shift: " << min_add_scan_shift << std::endl;
-  std::cout << "max_submap_size: " << max_submap_size << std::endl;
+  std::cout << "max_submap_size: " << max_localmap_size << std::endl;
   std::cout << "map_saved_dir: " << map_saved_dir << std::endl;
   std::cout << std::endl;
 
@@ -98,11 +84,24 @@ void LidarMapping::param_initial(ros::NodeHandle &privateHandle) {
   privateHandle.param<bool>("incremental_voxel_update", _incremental_voxel_update, true);
   std::cout << "incremental_voxel_update: " << _incremental_voxel_update << std::endl;  // 是否在cpu_ndt里做update????
 
+
+  downSizeFilterKeyFrames.setLeafSize(voxel_leaf_size, voxel_leaf_size, voxel_leaf_size); // 发布全局地图的采样size,设置小了导致系统卡顿
+  downSizeFilterGlobalMap.setLeafSize(voxel_leaf_size * 2,
+                                      voxel_leaf_size * 2,
+                                      voxel_leaf_size * 2); // 保存全局地图时下采样size，可以设置小一些方便看清楚点云细节
+  downSizeFilterLocalmap.setLeafSize(voxel_leaf_size * 2,
+                                     voxel_leaf_size * 2,
+                                     voxel_leaf_size * 2);// 发布localmap的下采样size
+
+  cloud_keyposes_3d_.reset(new pcl::PointCloud<PointT>());
+
+
+
   // 注意自定义类型格式在获取参数时的实现方式 !!
+  //  _method_type = MethodType::use_cpu;
   int method_type_temp;
   privateHandle.param<int>("ndt_method_type", method_type_temp, 1);
   _method_type = static_cast<MethodType>(method_type_temp);
-
   std::cout << std::endl;
 
   if (_method_type == MethodType::use_pcl) {
@@ -139,6 +138,8 @@ void LidarMapping::param_initial(ros::NodeHandle &privateHandle) {
     ROS_ERROR("Please Define _method_type to conduct NDT");
   }
 
+  Eigen::Matrix4f gnss_transform = Eigen::Matrix4f::Identity();  // 保存GPS信号的变量
+
   // 这里一般需要设定初始的雷达高度init_z
   privateHandle.param<double>("init_x", _tf_x, 0);
   privateHandle.param<double>("init_y", _tf_y, 0);
@@ -161,6 +162,18 @@ void LidarMapping::param_initial(ros::NodeHandle &privateHandle) {
   tf_btol = (tl_btol * rot_z_btol * rot_y_btol * rot_x_btol).matrix();
   tf_ltob = tf_btol.inverse();  // 将tf_btol取逆 --因为我们后面配准的时候都是相对于localMap的原点的,因此tf_ltob.inv将作为补偿的矩阵
 
+  // 定义各种差异值(两次采集数据之间的差异,包括点云位置差异,imu差异,odom差异,imu-odom差异)
+  diff = 0.0;
+  diff_x = diff_y = diff_z = 0.0;  // current_pose - previous_pose // 定义两帧点云差异值 --以确定是否更新点云等
+
+  // 定义速度值 --包括实际速度值,和imu取到的速度值
+  current_velocity_x = 0.0;
+  current_velocity_y = 0.0;
+  current_velocity_z = 0.0;
+
+  current_velocity_imu_x = 0.0;
+  current_velocity_imu_y = 0.0;
+  current_velocity_imu_z = 0.0;
 
   previous_pose.x = 0.0;
   previous_pose.y = 0.0;
@@ -249,7 +262,7 @@ void LidarMapping::run() {
       mutex_lock.unlock();
 
       // 应该去查询最近的imu数据并清空
-      if(_use_imu){
+      if (_use_imu) {
         std::lock_guard<std::mutex> lock(imu_data_mutex);
         auto imu_iter = imu_data.begin();
         for (imu_iter; imu_iter != imu_data.end(); imu_iter++) {
@@ -261,16 +274,29 @@ void LidarMapping::run() {
         }
         imu_data.erase(imu_data.begin(), imu_iter);
       }
-      std::cout << "imu buffer size : " << imu_data.size() << std::endl;
+      //std::cout << "imu buffer size : " << imu_data.size() << std::endl;
 
       // 取queue里面的第一条数据
       if (tmp.empty()) {
         ROS_ERROR("Scan is empty !!!");
         continue;
       }
-      std::vector<int> indices;   //remove NAN
+
+      //remove NAN
+      std::vector<int> indices;
       pcl::removeNaNFromPointCloud(tmp, tmp, indices);
-      process_cloud(tmp, current_scan_time);
+
+      // 去除远近的点云
+      double r;
+      pcl::PointCloud<pcl::PointXYZI> scan;
+      for (auto point:tmp.points) {
+        r = std::sqrt(pow(point.x, 2.0) + pow(point.y, 2.0));
+        if (min_scan_range < r && r < max_scan_range) {
+          scan.points.push_back(point);
+        }
+      }
+      // 匹配
+      process_cloud(scan, current_scan_time);
     }
   }
 
@@ -278,28 +304,19 @@ void LidarMapping::run() {
   save_map();
 }
 
-void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &tmp, const ros::Time &current_scan_time) {
+void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &scan, const ros::Time &current_scan_time) {
   ros::Time test_time_1 = ros::Time::now();
-  double r;
-  pcl::PointXYZI p;
-  pcl::PointCloud<pcl::PointXYZI> scan;
-  pcl::PointCloud<pcl::PointXYZI>::Ptr filtered_scan_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-  pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_scan_ptr(new pcl::PointCloud<pcl::PointXYZI>());
 
   tf::Quaternion q;
   Eigen::Matrix4f t_localizer(Eigen::Matrix4f::Identity());
   Eigen::Matrix4f t_base_link(Eigen::Matrix4f::Identity());
 
-  // 去除远近的点云
-  for (auto point:tmp.points) {
-    r = std::sqrt(pow(point.x, 2.0) + pow(point.y, 2.0));
-    if (min_scan_range < r && r < max_scan_range) {
-      scan.points.push_back(point);
-    }
-  }
   pcl::PointCloud<pcl::PointXYZI>::Ptr scan_ptr(new pcl::PointCloud<pcl::PointXYZI>(scan));
+  pcl::PointCloud<pcl::PointXYZI>::Ptr filtered_scan_ptr(new pcl::PointCloud<pcl::PointXYZI>());
+  pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_scan_ptr(new pcl::PointCloud<pcl::PointXYZI>());
 
   ndt_start = ros::Time::now();
+
   // 第一帧直接加入地图
   if (initial_scan_loaded == 0) {
     pcl::transformPointCloud(*scan_ptr, *transformed_scan_ptr, tf_btol);  // tf_btol为初始变换矩阵
@@ -308,45 +325,31 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &tmp, con
     initial_scan_loaded = 1;
   }
 
-  // Apply voxelgrid filter
-  pcl::VoxelGrid<pcl::PointXYZI> voxel_grid_filter;
-  voxel_grid_filter.setLeafSize(voxel_leaf_size, voxel_leaf_size, voxel_leaf_size);
-  voxel_grid_filter.setInputCloud(scan_ptr);
-  voxel_grid_filter.filter(*filtered_scan_ptr);
+  downSizeFilterKeyFrames.setInputCloud(scan_ptr);
+  downSizeFilterKeyFrames.filter(*filtered_scan_ptr);
 
   ros::Time test_time_2 = ros::Time::now();
 
   // map_ptr是map的一个指针
   // TODO:即localmap_ptr只是指向map,而并不是将localmap_ptr进行了拷贝
   pcl::PointCloud<pcl::PointXYZI>::Ptr
-      localmap_ptr(new pcl::PointCloud<pcl::PointXYZI>(localmap));  // 重要作用,用以保存降采样后的全局地图
+      localmap_ptr(new pcl::PointCloud<pcl::PointXYZI>(localmap));  // 用以保存降采样后的全局地图
 
   if (_method_type == MethodType::use_pcl) {
     pcl_ndt.setInputSource(filtered_scan_ptr);
-  } else if (_method_type == MethodType::use_cpu) {
-    cpu_ndt.setInputSource(filtered_scan_ptr);
-  } else if (_method_type == MethodType::use_gpu) {
-  } else if (_method_type == MethodType::use_omp) {
-    omp_ndt->setInputSource(filtered_scan_ptr);
-  } else {
-    ROS_ERROR("Please Define _method_type to conduct NDT");
-    exit(1);
-  }
-  ros::Time test_time_3 = ros::Time::now();  // TODO:
-
-  // 匹配的target是localmap
-  if (_method_type == MethodType::use_pcl) {
     pcl_ndt.setInputTarget(localmap_ptr);
   } else if (_method_type == MethodType::use_cpu) {
+    cpu_ndt.setInputSource(filtered_scan_ptr);
     cpu_ndt.setInputTarget(localmap_ptr);
-  } else if (_method_type == MethodType::use_gpu) {
-    //      gpu_ndt.setInputTarget(map_ptr);
   } else if (_method_type == MethodType::use_omp) {
+    omp_ndt->setInputSource(filtered_scan_ptr);
     omp_ndt->setInputTarget(localmap_ptr);
   } else {
     ROS_ERROR("Please Define _method_type to conduct NDT");
     exit(1);
   }
+
+  ros::Time test_time_3 = ros::Time::now();  // TODO:
 
   // 计算初始姿态，上一帧点云结果+传感器畸变
   guess_pose.x = previous_pose.x + diff_x;  // 初始时diff_x等都为0
@@ -406,19 +409,8 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &tmp, con
     t_localizer = cpu_ndt.getFinalTransformation();
     has_converged = cpu_ndt.hasConverged();
     final_num_iteration = cpu_ndt.getFinalNumIteration();
-  } else if (_method_type == MethodType::use_gpu) {
-//    gpu_ndt.align(init_guess);  // ndt_gpu库的align,不传出配准后的点云 ---用法同cpu_ndt
-//    fitness_score = gpu_ndt.getFitnessScore();
-//    t_localizer = gpu_ndt.getFinalTransformation();
-//    has_converged = gpu_ndt.hasConverged();
-//    final_num_iteration = gpu_ndt.getFinalNumIteration();
   } else if (_method_type == MethodType::use_omp) {
-    //    omp_ndt.align(*output_cloud, init_guess);   // omp_ndt.align用法同pcl::ndt
-    //    fitness_score = omp_ndt.getFitnessScore();
-    //    t_localizer = omp_ndt.getFinalTransformation();
-    //    has_converged = omp_ndt.hasConverged();
-    //    final_num_iteration = omp_ndt.getFinalNumIteration();
-    omp_ndt->align(*output_cloud, init_guess);   // omp_ndt.align用法同pcl::ndt
+    omp_ndt->align(*output_cloud, init_guess);
     fitness_score = omp_ndt->getFitnessScore();
     t_localizer = omp_ndt->getFinalTransformation();
     has_converged = omp_ndt->hasConverged();
@@ -440,7 +432,6 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &tmp, con
                  static_cast<double>(t_localizer(1, 1)), static_cast<double>(t_localizer(1, 2)),
                  static_cast<double>(t_localizer(2, 0)), static_cast<double>(t_localizer(2, 1)),
                  static_cast<double>(t_localizer(2, 2)));
-
   mat_b.setValue(static_cast<double>(t_base_link(0, 0)), static_cast<double>(t_base_link(0, 1)),
                  static_cast<double>(t_base_link(0, 2)), static_cast<double>(t_base_link(1, 0)),
                  static_cast<double>(t_base_link(1, 1)), static_cast<double>(t_base_link(1, 2)),
@@ -458,13 +449,18 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &tmp, con
   ndt_pose.y = t_base_link(1, 3);
   ndt_pose.z = t_base_link(2, 3);
   mat_b.getRPY(ndt_pose.roll, ndt_pose.pitch, ndt_pose.yaw, 1);
-  // current_pose对应的是全局下的坐标!
-  current_pose.x = ndt_pose.x;
-  current_pose.y = ndt_pose.y;
-  current_pose.z = ndt_pose.z;
+  // current_pose 对应的是全局下的坐标!
+  PointT this_pose_3d;
+  current_pose.x = this_pose_3d.x= ndt_pose.x;
+  current_pose.y =this_pose_3d.y =  ndt_pose.y;
+  current_pose.z = this_pose_3d.z = ndt_pose.z;
   current_pose.roll = ndt_pose.roll;
   current_pose.pitch = ndt_pose.pitch;
   current_pose.yaw = ndt_pose.yaw;
+
+  this_pose_3d.intensity = cloud_keyposes_3d_->points.size();
+  cloud_keyposes_3d_->points.push_back(this_pose_3d);
+
 
   // 以下:对current_pose做tf变换,
   static tf::TransformBroadcaster br;
@@ -549,26 +545,23 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &tmp, con
 
 
   // Calculate the shift between added_pos and current_pos // 以确定是否更新全局地图
-  // added_pose将一直定位于localMap的原点
-  // ################################################################################
+  // added_pose 将一直定位于localMap的原点
   ros::Time test_time_5 = ros::Time::now();
   double shift = sqrt(pow(current_pose.x - added_pose.x, 2.0) + pow(current_pose.y - added_pose.y, 2.0));
   if (shift >= min_add_scan_shift) {
-    pcl::VoxelGrid<pcl::PointXYZI> voxel_grid_filter_tomap;
-    voxel_grid_filter_tomap.setLeafSize(voxel_leaf_size * 2, voxel_leaf_size * 2, voxel_leaf_size * 2);
-    voxel_grid_filter_tomap.setInputCloud(transformed_scan_ptr);
-    voxel_grid_filter_tomap.filter(*transformed_scan_ptr);
+    downSizeFilterLocalmap.setInputCloud(transformed_scan_ptr);
+    downSizeFilterLocalmap.filter(*transformed_scan_ptr);
 
-    submap_size += shift;
+    localmap_size += shift;
     odom_size += shift;
 
     // 只有在fitnessscore状态好的情况下才选取作为关键帧加入到localmap中
-//    if(fitness_score< 0.2 && final_num_iteration < 4)
-//    {
-    localmap += *transformed_scan_ptr;
+    //    if(fitness_score< 0.2 && final_num_iteration < 4)
+    //    {
+    localmap += *transformed_scan_ptr; // localmap内的距离达到阈值就清空,并重新从0开始一帧一帧添加点云
     globalmap += *transformed_scan_ptr;
     submap += *transformed_scan_ptr;
-//    }
+    //    }
 
     added_pose.x = current_pose.x;
     added_pose.y = current_pose.y;
@@ -577,21 +570,18 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &tmp, con
     added_pose.pitch = current_pose.pitch;
     added_pose.yaw = current_pose.yaw;
 
+    // 只是说map更新了,因此target也要更新,不要落后太多
+    // 注意:此时加入的target:map_ptr并不包括刚加入点云的transformed_scan_ptr
     if (_method_type == MethodType::use_pcl)
-      pcl_ndt.setInputTarget(localmap_ptr);  // 注意:此时加入的target:map_ptr并不包括刚加入点云的transformed_scan_ptr
-    else if (_method_type == MethodType::use_cpu)  // 只是说map更新了,因此target也要更新,不要落后太多
-    {
+      pcl_ndt.setInputTarget(localmap_ptr);
+    else if (_method_type == MethodType::use_cpu) {
       if (_incremental_voxel_update)
         cpu_ndt.updateVoxelGrid(transformed_scan_ptr);
       else
         cpu_ndt.setInputTarget(localmap_ptr);
-    } /*else if (_method_type == MethodType::use_gpu)
-        //      gpu_ndt.setInputTarget(map_ptr);*/
-    else if (_method_type == MethodType::use_omp)
-      //      omp_ndt.setInputTarget(map_ptr);
+    } else if (_method_type == MethodType::use_omp)
       omp_ndt->setInputTarget(localmap_ptr);
   }
-  // ################################################################################
 
   // start5
   // 实时的点云也发布
@@ -604,31 +594,30 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &tmp, con
 
   // 发布globalmap
   pcl::PointCloud<pcl::PointXYZI>::Ptr target_cloud(new pcl::PointCloud<pcl::PointXYZI>());
+  pcl::PointCloud<pcl::PointXYZI>::Ptr local_cloud(new pcl::PointCloud<pcl::PointXYZI>());
   pcl::copyPointCloud(globalmap, *target_cloud);
-  pcl::VoxelGrid<pcl::PointXYZI> map_grid_filter;
-  map_grid_filter.setLeafSize(0.5, 0.5, 0.5);
-  map_grid_filter.setInputCloud(target_cloud);
-  map_grid_filter.filter(*target_cloud);
+  pcl::copyPointCloud(localmap, *local_cloud);
+  downSizeFilterGlobalMap.setInputCloud(target_cloud);
+  downSizeFilterGlobalMap.filter(*target_cloud);
+  downSizeFilterLocalmap.setInputCloud(local_cloud);
+  downSizeFilterLocalmap.filter(*local_cloud);
 
   if (ndt_map_pub.getNumSubscribers() > 0) {
     sensor_msgs::PointCloud2::Ptr map_msg_ptr(new sensor_msgs::PointCloud2);
     pcl::toROSMsg(*target_cloud, *map_msg_ptr);
-    //  pcl::toROSMsg(globalmap, *map_msg_ptr);
     map_msg_ptr->header.frame_id = "map";
     ndt_map_pub.publish(*map_msg_ptr);
   }
   target_cloud->clear();
-
   if (local_map_pub.getNumSubscribers() > 0) {
-    // localmap
     sensor_msgs::PointCloud2::Ptr localmap_msg_ptr(new sensor_msgs::PointCloud2);
-    pcl::toROSMsg(localmap, *localmap_msg_ptr);
+    pcl::toROSMsg(*local_cloud, *localmap_msg_ptr);
     localmap_msg_ptr->header.frame_id = "map";
     local_map_pub.publish(*localmap_msg_ptr);
   }
+  local_cloud->clear();
 
   if (current_odom_pub.getNumSubscribers()) {
-    // publish odom
     nav_msgs::Odometry odom;
     odom.header.stamp = current_scan_time;
     odom.header.frame_id = "map";
@@ -646,18 +635,25 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &tmp, con
     odom.twist.twist.linear.x = current_velocity_x;
     odom.twist.twist.linear.y = current_velocity_y;
     odom.twist.twist.angular.z = current_velocity_z;
-
     current_odom_pub.publish(odom);
+  }
+  // 发布关键帧位姿
+  if (keyposes_pub.getNumSubscribers() > 0) {
+    sensor_msgs::PointCloud2 msg;
+    pcl::toROSMsg(*cloud_keyposes_3d_, msg);
+    msg.header.frame_id = "map";
+    msg.header.stamp = ros::Time::now();
+    keyposes_pub.publish(msg);
   }
 
   ros::Time test_time_6 = ros::Time::now();
   // end5
 
-  // 清空localmap
-  if (submap_size >= max_submap_size) {
+  // 当局部地图内的距离大于阈值,则清空localmap
+  if (localmap_size >= max_localmap_size) {
     localmap = submap;
     submap.clear();
-    submap_size = 0.0;
+    localmap_size = 0.0;
   }
 
   std::cout << "Number of filtered scan points: " << filtered_scan_ptr->size() << " points." << std::endl;
@@ -668,7 +664,8 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &tmp, con
   std::cout << "Number of iteration: " << final_num_iteration << std::endl;
   std::cout << "Transformation Matrix:" << std::endl;
   std::cout << t_localizer << std::endl;
-  std::cout << "localmap shift: " << shift << std::endl;
+  std::cout << "scan shift: " << shift << std::endl;
+  std::cout << "localmap shift: " << localmap_size << std::endl;
   std::cout << "global path: " << odom_size << std::endl;
   std::cout << "1-2: " << (test_time_2 - test_time_1) << "ms" << "--downsample inputCloud" << std::endl;
   std::cout << "2-3: " << (test_time_3 - test_time_2) << "ms" << "--set params and inputSource" << std::endl;
@@ -680,13 +677,14 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &tmp, con
 }
 
 void LidarMapping::imu_callback(const sensor_msgs::Imu::Ptr &input) {
-  // std::cout << __func__ << std::endl;
 
   if (_imu_upside_down)  // _imu_upside_down指示是否进行imu的正负变换
     imuUpSideDown(input);
 
   std::lock_guard<std::mutex> lock(imu_data_mutex);
-  imu_data.push_back(input);
+  if (_use_imu) {
+    imu_data.push_back(input);
+  }
 
   //  mutex_lock.lock();
   //imuBuf.push(*input);
@@ -915,7 +913,6 @@ void LidarMapping::imu_info(const sensor_msgs::Imu &input) {
   const double diff_imu_roll = calcDiffForRadian(imu_roll, previous_imu_roll);
   const double diff_imu_pitch = calcDiffForRadian(imu_pitch, previous_imu_pitch);
   const double diff_imu_yaw = calcDiffForRadian(imu_yaw, previous_imu_yaw);
-  //
 
   imu.header = input.header;
   imu.linear_acceleration.x = input.linear_acceleration.x;
@@ -966,5 +963,14 @@ void LidarMapping::save_map() {
     }
     std::cout << "Saved globalmap " << pcd_filename << " (" << map_cloud->size() << " points)" << std::endl;
   }
+
+  // 优化后的位姿也保存一份
+  pcl::PointCloud<PointT>::Ptr poses(new pcl::PointCloud<PointT>());
+  pcl::copyPointCloud(*cloud_keyposes_3d_, *poses);
+  poses->width = poses->points.size();
+  poses->height = 1;
+  poses->is_dense = false;
+
+  pcl::io::savePCDFile(map_saved_dir + "trajectory_" + stamp + ".pcd", *poses);
 
 }

@@ -3,12 +3,12 @@
     <arg name="ndt_resolution" default="2.0"/>
     <arg name="ndt_step_size" default="0.1"/>
     <arg name="ndt_trans_eps" default="0.01"/>
-    <arg name="ndt_max_iter" default="50"/>
+    <arg name="ndt_max_iter" default="30"/>
     <arg name="voxel_leaf_size" default="0.5"/>
     <arg name="min_scan_range" default="0.2"/>
-    <arg name="max_scan_range" default="120.0"/>
+    <arg name="max_scan_range" default="80.0"/>
     <arg name="min_add_scan_shift" default="0.5"/>
-    <arg name="max_submap_size" default="30"/>
+    <arg name="max_submap_size" default="20"/>
 
     <arg name="init_x" default="0"/>
     <arg name="init_y" default="0"/>
@@ -17,13 +17,14 @@
     <arg name="init_pitch" default="0"/>
     <arg name="init_yaw" default="0"/>
 
-    <include file="$(find vehicle_description)/launch/lexus.launch"/>
+    <!--    <include file="$(find vehicle_description)/launch/lexus.launch"/>-->
     <node pkg="tf" type="static_transform_publisher" name="world_to_map" args="0.0001 0 0 0 0 0 /world /map 10"/>
-    <node pkg="tf" type="static_transform_publisher" name="rslidar" args="0 0 0 0 0 0 /base_link /velo_link 100"/>
+    <!--    <node pkg="tf" type="static_transform_publisher" name="rslidar" args="0 0 0 0 0 0 /base_link /velo_link 100"/>-->
+    <node pkg="tf" type="static_transform_publisher" name="rslidar" args="0 0 0 0 0 0 /base_link /vlp16_0 100"/>
 
     <node pkg="rviz" type="rviz" name="rviz" output="screen" args="-d $(find xchu_mapping)/rviz/mapping.rviz"/>
 
-    <node pkg="xchu_mapping" type="xchu_mapping_node" name="xchu_mapping_node" output="screen">
+    <node pkg="xchu_mapping" type="xchu_odom_node" name="xchu_odom_node" output="screen">
         <param name="ndt_resolution" value="$(arg ndt_resolution)"/>
         <param name="ndt_step_size" value="$(arg ndt_step_size)"/>
         <param name="ndt_trans_eps" value="$(arg ndt_trans_eps)"/>
@@ -36,15 +37,15 @@
 
         <param name="map_saved_dir" value="$(find xchu_mapping)/pcd/"/>
         <!--<param name="method_type"  value="1"  type="int"/>  -->
-        <param name="use_imu" value="true" type="bool"/>
+        <param name="use_imu" value="false" type="bool"/>
         <param name="use_odom" value="false" type="bool"/>
         <param name="imu_upside_down" value="false" type="bool"/>
 
-<!--        <param name="imu_topic" value="/imu/data" type="str"/>-->
-                <param name="imu_topic" value="/kitti/oxts/imu" type="str"/>
+        <!--      /imu/data  /kitti/oxts/imu  -->
+        <param name="imu_topic" value="/trunk_info/imu" type="str"/>
         <param name="odom_topic" value="/golfcar/odom" type="str"/>
-                <param name="lidar_topic" value="/kitti/velo/pointcloud" type="str"/>
-<!--        <param name="lidar_topic" value="/top/rslidar_points" type="str"/>-->
+        <!-- /top/rslidar_points  /vlp16_0/velodyne_points /kitti/velo/pointcloud -->
+        <param name="lidar_topic" value="/vlp16_0/velodyne_points" type="str"/>
 
         <param name="ndt_method_type" value="3" type="int"/> <!--pcl:0,cpu:1,gpu:2,omp:3,gpu_ptr:4-->
         <param name="incremental_voxel_update" value="true" type="bool"/>
