@@ -86,19 +86,15 @@ void LidarMapping::param_initial(ros::NodeHandle &privateHandle) {
 
 
   downSizeFilterKeyFrames.setLeafSize(voxel_leaf_size, voxel_leaf_size, voxel_leaf_size); // 发布全局地图的采样size,设置小了导致系统卡顿
-  downSizeFilterGlobalMap.setLeafSize(voxel_leaf_size * 2,
-                                      voxel_leaf_size * 2,
-                                      voxel_leaf_size * 2); // 保存全局地图时下采样size，可以设置小一些方便看清楚点云细节
+  downSizeFilterGlobalMap.setLeafSize(voxel_leaf_size,
+                                      voxel_leaf_size,
+                                      voxel_leaf_size); // 保存全局地图时下采样size，可以设置小一些方便看清楚点云细节
   downSizeFilterLocalmap.setLeafSize(voxel_leaf_size * 2,
                                      voxel_leaf_size * 2,
                                      voxel_leaf_size * 2);// 发布localmap的下采样size
 
   cloud_keyposes_3d_.reset(new pcl::PointCloud<PointT>());
 
-
-
-  // 注意自定义类型格式在获取参数时的实现方式 !!
-  //  _method_type = MethodType::use_cpu;
   int method_type_temp;
   privateHandle.param<int>("ndt_method_type", method_type_temp, 1);
   _method_type = static_cast<MethodType>(method_type_temp);
@@ -116,12 +112,6 @@ void LidarMapping::param_initial(ros::NodeHandle &privateHandle) {
     cpu_ndt.setStepSize(step_size);
     cpu_ndt.setResolution(ndt_res);
     cpu_ndt.setMaximumIterations(max_iter);
-  } else if (_method_type == MethodType::use_gpu) {
-    std::cout << ">> Use GPU NDT <<" << std::endl;
-    //    gpu_ndt.setTransformationEpsilon(trans_eps);
-    //    gpu_ndt.setStepSize(step_size);
-    //    gpu_ndt.setResolution(ndt_res);
-    //    gpu_ndt.setMaximumIterations(max_iter);
   } else if (_method_type == MethodType::use_omp) {
     std::cout << ">> Use OMP NDT <<" << std::endl;
     pclomp::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI>::Ptr ndt(
@@ -152,6 +142,9 @@ void LidarMapping::param_initial(ros::NodeHandle &privateHandle) {
   std::cout << std::endl;
   std::cout << "******************************************" << std::endl;
 
+  cloud_keyposes_3d_.reset(new pcl::PointCloud<PointT>());
+  cloud_keyposes_6d_.reset(new pcl::PointCloud<PointXYZIRPYT>());
+
   // 根据初始设定的_tf,_roll等,初始化tl_btol rot_x_btol等
   Eigen::Translation3f tl_btol(_tf_x, _tf_y, _tf_z);                 // tl: translation  // tl_btol是初始设定的
   Eigen::AngleAxisf rot_x_btol(_tf_roll, Eigen::Vector3f::UnitX());  // rot: rotation
@@ -162,10 +155,6 @@ void LidarMapping::param_initial(ros::NodeHandle &privateHandle) {
   tf_btol = (tl_btol * rot_z_btol * rot_y_btol * rot_x_btol).matrix();
   tf_ltob = tf_btol.inverse();  // 将tf_btol取逆 --因为我们后面配准的时候都是相对于localMap的原点的,因此tf_ltob.inv将作为补偿的矩阵
 
-  // 定义各种差异值(两次采集数据之间的差异,包括点云位置差异,imu差异,odom差异,imu-odom差异)
-  diff = 0.0;
-  diff_x = diff_y = diff_z = 0.0;  // current_pose - previous_pose // 定义两帧点云差异值 --以确定是否更新点云等
-
   // 定义速度值 --包括实际速度值,和imu取到的速度值
   current_velocity_x = 0.0;
   current_velocity_y = 0.0;
@@ -174,74 +163,6 @@ void LidarMapping::param_initial(ros::NodeHandle &privateHandle) {
   current_velocity_imu_x = 0.0;
   current_velocity_imu_y = 0.0;
   current_velocity_imu_z = 0.0;
-
-  previous_pose.x = 0.0;
-  previous_pose.y = 0.0;
-  previous_pose.z = 0.0;
-  previous_pose.roll = 0.0;
-  previous_pose.pitch = 0.0;
-  previous_pose.yaw = 0.0;
-
-  ndt_pose.x = 0.0;
-  ndt_pose.y = 0.0;
-  ndt_pose.z = 0.0;
-  ndt_pose.roll = 0.0;
-  ndt_pose.pitch = 0.0;
-  ndt_pose.yaw = 0.0;
-
-  current_pose.x = 0.0;
-  current_pose.y = 0.0;
-  current_pose.z = 0.0;
-  current_pose.roll = 0.0;
-  current_pose.pitch = 0.0;
-  current_pose.yaw = 0.0;
-
-  current_pose_imu.x = 0.0;
-  current_pose_imu.y = 0.0;
-  current_pose_imu.z = 0.0;
-  current_pose_imu.roll = 0.0;
-  current_pose_imu.pitch = 0.0;
-  current_pose_imu.yaw = 0.0;
-
-  guess_pose.x = 0.0;
-  guess_pose.y = 0.0;
-  guess_pose.z = 0.0;
-  guess_pose.roll = 0.0;
-  guess_pose.pitch = 0.0;
-  guess_pose.yaw = 0.0;
-
-  added_pose.x = 0.0;
-  added_pose.y = 0.0;
-  added_pose.z = 0.0;
-  added_pose.roll = 0.0;
-  added_pose.pitch = 0.0;
-  added_pose.yaw = 0.0;
-
-  diff_x = 0.0;
-  diff_y = 0.0;
-  diff_z = 0.0;
-  diff_yaw = 0.0;
-
-  offset_imu_x = 0.0;
-  offset_imu_y = 0.0;
-  offset_imu_z = 0.0;
-  offset_imu_roll = 0.0;
-  offset_imu_pitch = 0.0;
-  offset_imu_yaw = 0.0;
-
-  offset_odom_x = 0.0;
-  offset_odom_y = 0.0;
-  offset_odom_z = 0.0;
-  offset_odom_roll = 0.0;
-  offset_odom_pitch = 0.0;
-  offset_odom_yaw = 0.0;
-
-  offset_imu_odom_x = 0.0;
-  offset_imu_odom_y = 0.0;
-  offset_imu_odom_z = 0.0;
-  offset_imu_odom_roll = 0.0;
-  offset_imu_odom_pitch = 0.0;
-  offset_imu_odom_yaw = 0.0;
 
   ROS_INFO("params init");
 }
@@ -252,8 +173,8 @@ void LidarMapping::run() {
     ros::spinOnce();
     rate.sleep();
 
-    std::cout << "cloud buffer size : " << cloudBuf.size() << std::endl;
     if (!cloudBuf.empty()) {
+      std::cout << "cloud buffer size : " << cloudBuf.size() << std::endl;
       mutex_lock.lock();
       pcl::PointCloud<pcl::PointXYZI> tmp;
       pcl::fromROSMsg(cloudBuf.front(), tmp);
@@ -305,15 +226,17 @@ void LidarMapping::run() {
 }
 
 void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &scan, const ros::Time &current_scan_time) {
-  ros::Time test_time_1 = ros::Time::now();
 
-  tf::Quaternion q;
-  Eigen::Matrix4f t_localizer(Eigen::Matrix4f::Identity());
-  Eigen::Matrix4f t_base_link(Eigen::Matrix4f::Identity());
+  t_localizer.setIdentity();
+  t_base_link.setIdentity();
 
   pcl::PointCloud<pcl::PointXYZI>::Ptr scan_ptr(new pcl::PointCloud<pcl::PointXYZI>(scan));
-  pcl::PointCloud<pcl::PointXYZI>::Ptr filtered_scan_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-  pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_scan_ptr(new pcl::PointCloud<pcl::PointXYZI>());
+  filtered_scan_ptr.reset(new pcl::PointCloud<pcl::PointXYZI>());
+  transformed_scan_ptr.reset(new pcl::PointCloud<pcl::PointXYZI>());
+
+  // downsize scan
+  downSizeFilterKeyFrames.setInputCloud(scan_ptr);
+  downSizeFilterKeyFrames.filter(*filtered_scan_ptr);
 
   ndt_start = ros::Time::now();
 
@@ -325,16 +248,8 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &scan, co
     initial_scan_loaded = 1;
   }
 
-  downSizeFilterKeyFrames.setInputCloud(scan_ptr);
-  downSizeFilterKeyFrames.filter(*filtered_scan_ptr);
-
-  ros::Time test_time_2 = ros::Time::now();
-
-  // map_ptr是map的一个指针
-  // TODO:即localmap_ptr只是指向map,而并不是将localmap_ptr进行了拷贝
-  pcl::PointCloud<pcl::PointXYZI>::Ptr
-      localmap_ptr(new pcl::PointCloud<pcl::PointXYZI>(localmap));  // 用以保存降采样后的全局地图
-
+  // 用以保存降采样后的localmap
+  pcl::PointCloud<pcl::PointXYZI>::Ptr localmap_ptr(new pcl::PointCloud<pcl::PointXYZI>(localmap));
   if (_method_type == MethodType::use_pcl) {
     pcl_ndt.setInputSource(filtered_scan_ptr);
     pcl_ndt.setInputTarget(localmap_ptr);
@@ -349,60 +264,44 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &scan, co
     exit(1);
   }
 
-  ros::Time test_time_3 = ros::Time::now();  // TODO:
-
   // 计算初始姿态，上一帧点云结果+传感器畸变
-  guess_pose.x = previous_pose.x + diff_x;  // 初始时diff_x等都为0
-  guess_pose.y = previous_pose.y + diff_y;
-  guess_pose.z = previous_pose.z + diff_z;
+  guess_pose.x = previous_pose.x + diff_pose.x;  // 初始时diff_x等都为0
+  guess_pose.y = previous_pose.y + diff_pose.y;
+  guess_pose.z = previous_pose.z + diff_pose.z;
   guess_pose.roll = previous_pose.roll;
   guess_pose.pitch = previous_pose.pitch;
-  guess_pose.yaw = previous_pose.yaw + diff_yaw;
+  guess_pose.yaw = previous_pose.yaw + diff_pose.yaw;
+  guess_pose.updateT();
 
-  // 根据是否使用imu和odom,按照不同方式更新guess_pose(xyz,or/and rpy)
-  if (_use_imu && _use_odom)
+  // 根据是否使用imu和odom, calculate diff
+  Pose guess_pose_for_ndt;
+  if (_use_imu && _use_odom) {
     imu_odom_calc(current_scan_time);
-  if (_use_imu && !_use_odom)
-    imu_calc(current_scan_time);
-  if (!_use_imu && _use_odom)
-    odom_calc(current_scan_time);
-
-  // start2 只是为了把上面不同方式的guess_pose都标准化成guess_pose_for_ndt,为了后续操作方便
-  pose guess_pose_for_ndt;
-  if (_use_imu && _use_odom)
     guess_pose_for_ndt = guess_pose_imu_odom;
-  else if (_use_imu && !_use_odom)
+  } else if (_use_imu && !_use_odom) {
+    imu_calc(current_scan_time);
     guess_pose_for_ndt = guess_pose_imu;
-  else if (!_use_imu && _use_odom)
+  } else if (!_use_imu && _use_odom) {
+    odom_calc(current_scan_time);
     guess_pose_for_ndt = guess_pose_odom;
-  else
+  } else {
     guess_pose_for_ndt = guess_pose;
-  // end2
+  }
 
   // start3 以下:根据guess_pose_for_ndt 来计算初始变换矩阵guess_init -- 针对TargetSource
-  Eigen::AngleAxisf init_rotation_x(static_cast<const float &>(guess_pose_for_ndt.roll), Eigen::Vector3f::UnitX());
-  Eigen::AngleAxisf init_rotation_y(static_cast<const float &>(guess_pose_for_ndt.pitch), Eigen::Vector3f::UnitY());
-  Eigen::AngleAxisf init_rotation_z(static_cast<const float &>(guess_pose_for_ndt.yaw), Eigen::Vector3f::UnitZ());
-  Eigen::Translation3f init_translation(static_cast<const float &>(guess_pose_for_ndt.x),
-                                        static_cast<const float &>(guess_pose_for_ndt.y),
-                                        static_cast<const float &>(guess_pose_for_ndt.z));
-  Eigen::Matrix4f init_guess =
-      (init_translation * init_rotation_z * init_rotation_y * init_rotation_x).matrix() * tf_btol;  // tf_btol
-  // end3
+  Eigen::Matrix4f init_guess = guess_pose_for_ndt.t.matrix() * tf_btol;  // tf_btol
 
   t3_end = ros::Time::now();
   d3 = t3_end - t3_start;
 
   // 用以保存ndt转换后的点云,align参数
   pcl::PointCloud<pcl::PointXYZI>::Ptr output_cloud(new pcl::PointCloud<pcl::PointXYZI>);
-
   if (_method_type == MethodType::use_pcl) {
     pcl_ndt.align(*output_cloud, init_guess);  // pcl::aligin 需传入转换后的点云(容器),估计变换
     fitness_score = pcl_ndt.getFitnessScore();
     t_localizer = pcl_ndt.getFinalTransformation();  // t_localizer为ndt变换得到的最终变换矩阵(即source和target之间的变换)
     has_converged = pcl_ndt.hasConverged();
     final_num_iteration = pcl_ndt.getFinalNumIteration();
-    transformation_probability = pcl_ndt.getTransformationProbability();
   } else if (_method_type == MethodType::use_cpu) {
     cpu_ndt.align(init_guess);            // cpu::align 只需要传入估计变换 --建图的时候传入估计变换,定位matching的时候传入空的单位Eigen
     fitness_score = cpu_ndt.getFitnessScore();
@@ -417,50 +316,16 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &scan, co
     final_num_iteration = omp_ndt->getFinalNumIteration();
   }
   ndt_end = ros::Time::now();
-  ros::Time test_time_4 = ros::Time::now();  // TODO:
 
   // bask_link 需要排除掉全局起始点偏移造成的影响，全局起点偏移就是雷达起始有个高度和yaw偏角
   // t_localizer是相对位姿,t_base_link对应的是全局位姿
   t_base_link = t_localizer * tf_ltob;
 
+  localizer_pose.updatePose(t_localizer);
+  current_pose.updatePose(t_base_link);
+
   // 当前帧转换到全局地图上
   pcl::transformPointCloud(*scan_ptr, *transformed_scan_ptr, t_localizer);
-
-  tf::Matrix3x3 mat_l, mat_b;  // 用以根据齐次坐标下的旋转变换,来求rpy转换角度
-  mat_l.setValue(static_cast<double>(t_localizer(0, 0)), static_cast<double>(t_localizer(0, 1)),
-                 static_cast<double>(t_localizer(0, 2)), static_cast<double>(t_localizer(1, 0)),
-                 static_cast<double>(t_localizer(1, 1)), static_cast<double>(t_localizer(1, 2)),
-                 static_cast<double>(t_localizer(2, 0)), static_cast<double>(t_localizer(2, 1)),
-                 static_cast<double>(t_localizer(2, 2)));
-  mat_b.setValue(static_cast<double>(t_base_link(0, 0)), static_cast<double>(t_base_link(0, 1)),
-                 static_cast<double>(t_base_link(0, 2)), static_cast<double>(t_base_link(1, 0)),
-                 static_cast<double>(t_base_link(1, 1)), static_cast<double>(t_base_link(1, 2)),
-                 static_cast<double>(t_base_link(2, 0)), static_cast<double>(t_base_link(2, 1)),
-                 static_cast<double>(t_base_link(2, 2)));
-
-
-  // Update localizer_pose.  // 更新局部下的坐标
-  localizer_pose.x = t_localizer(0, 3);
-  localizer_pose.y = t_localizer(1, 3);
-  localizer_pose.z = t_localizer(2, 3);
-  mat_l.getRPY(localizer_pose.roll, localizer_pose.pitch, localizer_pose.yaw, 1);
-  // Update ndt_pose.  // 更新全局下的坐标
-  ndt_pose.x = t_base_link(0, 3);
-  ndt_pose.y = t_base_link(1, 3);
-  ndt_pose.z = t_base_link(2, 3);
-  mat_b.getRPY(ndt_pose.roll, ndt_pose.pitch, ndt_pose.yaw, 1);
-  // current_pose 对应的是全局下的坐标!
-  PointT this_pose_3d;
-  current_pose.x = this_pose_3d.x= ndt_pose.x;
-  current_pose.y =this_pose_3d.y =  ndt_pose.y;
-  current_pose.z = this_pose_3d.z = ndt_pose.z;
-  current_pose.roll = ndt_pose.roll;
-  current_pose.pitch = ndt_pose.pitch;
-  current_pose.yaw = ndt_pose.yaw;
-
-  this_pose_3d.intensity = cloud_keyposes_3d_->points.size();
-  cloud_keyposes_3d_->points.push_back(this_pose_3d);
-
 
   // 以下:对current_pose做tf变换,
   static tf::TransformBroadcaster br;
@@ -470,83 +335,7 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &scan, co
   transform.setRotation(q);
   br.sendTransform(tf::StampedTransform(transform, current_scan_time, "map", "base_link"));
 
-  // 根据current和previous两帧之间的scantime,以及两帧之间的位置,计算两帧之间的变化
-  scan_duration = current_scan_time - previous_scan_time;
-  double secs = scan_duration.toSec();
-
-  // Calculate the offset (curren_pos - previous_pos)
-  diff_x = current_pose.x - previous_pose.x;
-  diff_y = current_pose.y - previous_pose.y;
-  diff_z = current_pose.z - previous_pose.z;
-  diff_yaw = calcDiffForRadian(current_pose.yaw, previous_pose.yaw);
-  diff = sqrt(diff_x * diff_x + diff_y * diff_y + diff_z * diff_z);
-
-  current_velocity_x = diff_x / secs;
-  current_velocity_y = diff_y / secs;
-  current_velocity_z = diff_z / secs;
-
-  current_pose_imu.x = current_pose.x;
-  current_pose_imu.y = current_pose.y;
-  current_pose_imu.z = current_pose.z;
-  current_pose_imu.roll = current_pose.roll;
-  current_pose_imu.pitch = current_pose.pitch;
-  current_pose_imu.yaw = current_pose.yaw;
-
-  current_pose_odom.x = current_pose.x;
-  current_pose_odom.y = current_pose.y;
-  current_pose_odom.z = current_pose.z;
-  current_pose_odom.roll = current_pose.roll;
-  current_pose_odom.pitch = current_pose.pitch;
-  current_pose_odom.yaw = current_pose.yaw;
-
-  current_pose_imu_odom.x = current_pose.x;
-  current_pose_imu_odom.y = current_pose.y;
-  current_pose_imu_odom.z = current_pose.z;
-  current_pose_imu_odom.roll = current_pose.roll;
-  current_pose_imu_odom.pitch = current_pose.pitch;
-  current_pose_imu_odom.yaw = current_pose.yaw;
-
-  current_velocity_imu_x = current_velocity_x;  // 修正imu速度
-  current_velocity_imu_y = current_velocity_y;
-  current_velocity_imu_z = current_velocity_z;
-  // ************************************************
-
-  // Update position and posture. current_pos -> previous_pos
-  previous_pose.x = current_pose.x;
-  previous_pose.y = current_pose.y;
-  previous_pose.z = current_pose.z;
-  previous_pose.roll = current_pose.roll;
-  previous_pose.pitch = current_pose.pitch;
-  previous_pose.yaw = current_pose.yaw;
-
-  previous_scan_time.sec = current_scan_time.sec;
-  previous_scan_time.nsec = current_scan_time.nsec;
-
-  offset_imu_x = 0.0;
-  offset_imu_y = 0.0;
-  offset_imu_z = 0.0;
-  offset_imu_roll = 0.0;
-  offset_imu_pitch = 0.0;
-  offset_imu_yaw = 0.0;
-
-  offset_odom_x = 0.0;
-  offset_odom_y = 0.0;
-  offset_odom_z = 0.0;
-  offset_odom_roll = 0.0;
-  offset_odom_pitch = 0.0;
-  offset_odom_yaw = 0.0;
-
-  offset_imu_odom_x = 0.0;
-  offset_imu_odom_y = 0.0;
-  offset_imu_odom_z = 0.0;
-  offset_imu_odom_roll = 0.0;
-  offset_imu_odom_pitch = 0.0;
-  offset_imu_odom_yaw = 0.0;
-
-
-  // Calculate the shift between added_pos and current_pos // 以确定是否更新全局地图
-  // added_pose 将一直定位于localMap的原点
-  ros::Time test_time_5 = ros::Time::now();
+  // Calculate the shift between added_pos and current_pos. added_pose 将一直定位于localMap的原点
   double shift = sqrt(pow(current_pose.x - added_pose.x, 2.0) + pow(current_pose.y - added_pose.y, 2.0));
   if (shift >= min_add_scan_shift) {
     downSizeFilterLocalmap.setInputCloud(transformed_scan_ptr);
@@ -556,19 +345,9 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &scan, co
     odom_size += shift;
 
     // 只有在fitnessscore状态好的情况下才选取作为关键帧加入到localmap中
-    //    if(fitness_score< 0.2 && final_num_iteration < 4)
-    //    {
     localmap += *transformed_scan_ptr; // localmap内的距离达到阈值就清空,并重新从0开始一帧一帧添加点云
-    globalmap += *transformed_scan_ptr;
     submap += *transformed_scan_ptr;
-    //    }
-
-    added_pose.x = current_pose.x;
-    added_pose.y = current_pose.y;
-    added_pose.z = current_pose.z;
-    added_pose.roll = current_pose.roll;
-    added_pose.pitch = current_pose.pitch;
-    added_pose.yaw = current_pose.yaw;
+    added_pose = current_pose;
 
     // 只是说map更新了,因此target也要更新,不要落后太多
     // 注意:此时加入的target:map_ptr并不包括刚加入点云的transformed_scan_ptr
@@ -582,72 +361,6 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &scan, co
     } else if (_method_type == MethodType::use_omp)
       omp_ndt->setInputTarget(localmap_ptr);
   }
-
-  // start5
-  // 实时的点云也发布
-  if (current_points_pub.getNumSubscribers() > 0) {
-    sensor_msgs::PointCloud2::Ptr pointcloud_current_ptr(new sensor_msgs::PointCloud2);
-    pcl::toROSMsg(*transformed_scan_ptr, *pointcloud_current_ptr);
-    pointcloud_current_ptr->header.frame_id = "map";
-    current_points_pub.publish(*pointcloud_current_ptr);
-  }
-
-  // 发布globalmap
-  pcl::PointCloud<pcl::PointXYZI>::Ptr target_cloud(new pcl::PointCloud<pcl::PointXYZI>());
-  pcl::PointCloud<pcl::PointXYZI>::Ptr local_cloud(new pcl::PointCloud<pcl::PointXYZI>());
-  pcl::copyPointCloud(globalmap, *target_cloud);
-  pcl::copyPointCloud(localmap, *local_cloud);
-  downSizeFilterGlobalMap.setInputCloud(target_cloud);
-  downSizeFilterGlobalMap.filter(*target_cloud);
-  downSizeFilterLocalmap.setInputCloud(local_cloud);
-  downSizeFilterLocalmap.filter(*local_cloud);
-
-  if (ndt_map_pub.getNumSubscribers() > 0) {
-    sensor_msgs::PointCloud2::Ptr map_msg_ptr(new sensor_msgs::PointCloud2);
-    pcl::toROSMsg(*target_cloud, *map_msg_ptr);
-    map_msg_ptr->header.frame_id = "map";
-    ndt_map_pub.publish(*map_msg_ptr);
-  }
-  target_cloud->clear();
-  if (local_map_pub.getNumSubscribers() > 0) {
-    sensor_msgs::PointCloud2::Ptr localmap_msg_ptr(new sensor_msgs::PointCloud2);
-    pcl::toROSMsg(*local_cloud, *localmap_msg_ptr);
-    localmap_msg_ptr->header.frame_id = "map";
-    local_map_pub.publish(*localmap_msg_ptr);
-  }
-  local_cloud->clear();
-
-  if (current_odom_pub.getNumSubscribers()) {
-    nav_msgs::Odometry odom;
-    odom.header.stamp = current_scan_time;
-    odom.header.frame_id = "map";
-
-    odom.pose.pose.position.x = current_pose.x;
-    odom.pose.pose.position.y = current_pose.y;
-    odom.pose.pose.position.z = current_pose.z;
-
-    odom.pose.pose.orientation.x = q.x();
-    odom.pose.pose.orientation.y = q.y();
-    odom.pose.pose.orientation.z = q.z();
-    odom.pose.pose.orientation.w = q.w();
-
-    odom.child_frame_id = "base_link";
-    odom.twist.twist.linear.x = current_velocity_x;
-    odom.twist.twist.linear.y = current_velocity_y;
-    odom.twist.twist.angular.z = current_velocity_z;
-    current_odom_pub.publish(odom);
-  }
-  // 发布关键帧位姿
-  if (keyposes_pub.getNumSubscribers() > 0) {
-    sensor_msgs::PointCloud2 msg;
-    pcl::toROSMsg(*cloud_keyposes_3d_, msg);
-    msg.header.frame_id = "map";
-    msg.header.stamp = ros::Time::now();
-    keyposes_pub.publish(msg);
-  }
-
-  ros::Time test_time_6 = ros::Time::now();
-  // end5
 
   // 当局部地图内的距离大于阈值,则清空localmap
   if (localmap_size >= max_localmap_size) {
@@ -667,21 +380,103 @@ void LidarMapping::process_cloud(const pcl::PointCloud<pcl::PointXYZI> &scan, co
   std::cout << "scan shift: " << shift << std::endl;
   std::cout << "localmap shift: " << localmap_size << std::endl;
   std::cout << "global path: " << odom_size << std::endl;
-  std::cout << "1-2: " << (test_time_2 - test_time_1) << "ms" << "--downsample inputCloud" << std::endl;
-  std::cout << "2-3: " << (test_time_3 - test_time_2) << "ms" << "--set params and inputSource" << std::endl;
-  std::cout << "3-4: " << (test_time_4 - test_time_3) << "ms" << "--handle imu/odom and cal ndt resule"
-            << std::endl;
-  std::cout << "4-5: " << (test_time_5 - test_time_4) << "ms" << "--get current pose" << std::endl;
-  std::cout << "5-6: " << (test_time_6 - test_time_5) << "ms" << "--publish current pose" << std::endl;
   std::cout << "-----------------------------------------------------------------" << std::endl;
+
+  // choose key frames
+  save_keyframes();
+
+  // publish cloud
+  publish_cloud();
+}
+
+bool LidarMapping::save_keyframes() {
+  if (cloud_keyposes_3d_->points.empty()) {
+    previous_pose = current_pose;
+  } else {
+    const auto &pre_pose = cloud_keyposes_6d_->points[cloud_keyposes_3d_->points.size() - 1];
+
+    // 关集帧之间的距离大于0.5米才将其加到位姿图中
+    if (std::pow(current_pose.x - pre_pose.x, 2) +
+        std::pow(current_pose.y - pre_pose.y, 2) +
+        std::pow(current_pose.z - pre_pose.z, 2) <
+        keyframe_dist * keyframe_dist) {
+      ROS_WARN("frames are too close...");
+      return false;
+    }
+//    if (fitness_score > 1.0) {
+//      ROS_WARN("bad tranforme...");
+//      return false;
+//    }
+  }
+
+  // 保存关键帧和位姿, 更新current_pose
+  // current_pose 对应的是全局下的坐标!
+  PointT this_pose_3d;
+  PointXYZIRPYT this_pose_6d;
+
+  this_pose_6d.x = this_pose_3d.x = current_pose.x;
+  this_pose_6d.y = this_pose_3d.y = current_pose.y;
+  this_pose_6d.z = this_pose_3d.z = current_pose.z;
+  this_pose_6d.roll = current_pose.roll;
+  this_pose_6d.pitch = current_pose.pitch;
+  this_pose_6d.yaw = current_pose.yaw;
+  this_pose_6d.time = current_scan_time.toSec();
+  this_pose_6d.intensity = this_pose_3d.intensity = cloud_keyposes_3d_->points.size();
+
+  cloud_keyposes_3d_->points.push_back(this_pose_3d);
+  cloud_keyposes_6d_->points.push_back(this_pose_6d);
+
+  // 存储关键帧
+  pcl::PointCloud<PointT>::Ptr cur_keyframe(new pcl::PointCloud<PointT>());
+  pcl::copyPointCloud(*transformed_scan_ptr, *cur_keyframe);
+  for (auto &p : cur_keyframe->points) {
+    p.intensity = this_pose_3d.intensity;
+  }
+  cloud_keyframes.push_back(cur_keyframe);
+  globalmap += *transformed_scan_ptr;  // update global map
+  ROS_INFO("saveKeyframesAndFactor: %d points", cur_keyframe->points.size());
+
+  // 根据current和previous两帧之间的scantime,以及两帧之间的位置,计算两帧之间的变化
+  scan_duration = current_scan_time - previous_scan_time;
+  double secs = scan_duration.toSec();
+
+  // Calculate the offset (curren_pos - previous_pos)
+  diff_pose.x = current_pose.x - previous_pose.x;
+  diff_pose.y = current_pose.y - previous_pose.y;
+  diff_pose.z = current_pose.z - previous_pose.z;
+  diff_pose.yaw = calcDiffForRadian(current_pose.yaw, previous_pose.yaw);
+  diff = sqrt(diff_pose.x * diff_pose.x + diff_pose.y * diff_pose.y + diff_pose.z * diff_pose.z);
+
+  // estimate velocity
+  current_velocity_x = diff_pose.x / secs;
+  current_velocity_y = diff_pose.y / secs;
+  current_velocity_z = diff_pose.z / secs;
+
+  // 修正imu速度
+  current_velocity_imu_x = current_velocity_x;
+  current_velocity_imu_y = current_velocity_y;
+  current_velocity_imu_z = current_velocity_z;
+
+  current_pose_imu = current_pose_odom = current_pose_imu_odom = current_pose;
+
+  // Update position and posture. current_pos -> previous_pos
+  previous_pose = current_pose;
+  previous_scan_time.sec = current_scan_time.sec;
+  previous_scan_time.nsec = current_scan_time.nsec;
+
+  offset_imu_pose.init();
+  offset_odom_pose.init();
+  offset_imu_odom_pose.init();
+
+  return true;
 }
 
 void LidarMapping::imu_callback(const sensor_msgs::Imu::Ptr &input) {
 
+  std::lock_guard<std::mutex> lock(imu_data_mutex);
   if (_imu_upside_down)  // _imu_upside_down指示是否进行imu的正负变换
     imuUpSideDown(input);
 
-  std::lock_guard<std::mutex> lock(imu_data_mutex);
   if (_use_imu) {
     imu_data.push_back(input);
   }
@@ -765,25 +560,41 @@ void LidarMapping::imu_odom_calc(ros::Time current_time) {
 
   // odom信息处理,计算 -- xyz移动距离的计算,融合odom的速度(位移)信息和imu的转角信息
   double diff_distance = odom.twist.twist.linear.x * diff_time;
-  offset_imu_odom_x += diff_distance * cos(-current_pose_imu_odom.pitch) * cos(current_pose_imu_odom.yaw);
+/*  offset_imu_odom_x += diff_distance * cos(-current_pose_imu_odom.pitch) * cos(current_pose_imu_odom.yaw);
   offset_imu_odom_y += diff_distance * cos(-current_pose_imu_odom.pitch) * sin(current_pose_imu_odom.yaw);
   offset_imu_odom_z += diff_distance * sin(-current_pose_imu_odom.pitch);
 
   offset_imu_odom_roll += diff_imu_roll;
   offset_imu_odom_pitch += diff_imu_pitch;
-  offset_imu_odom_yaw += diff_imu_yaw;
+  offset_imu_odom_yaw += diff_imu_yaw;*/
+
+  offset_imu_odom_pose.x += diff_distance * cos(-current_pose_imu_odom.pitch) * cos(current_pose_imu_odom.yaw);
+  offset_imu_odom_pose.y += diff_distance * cos(-current_pose_imu_odom.pitch) * sin(current_pose_imu_odom.yaw);
+  offset_imu_odom_pose.z += diff_distance * sin(-current_pose_imu_odom.pitch);
+
+  offset_imu_odom_pose.roll += diff_imu_roll;
+  offset_imu_odom_pose.pitch += diff_imu_pitch;
+  offset_imu_odom_pose.yaw += diff_imu_yaw;
 
   // ==> 最终的目的是融合imu和odom输出一个guess_pose
   // 注:guess_pose是在previous_pose基础上叠加一个offset,包括xyz的和rpy的
   // xyz的offset需要融合imu的转角和odom的速度(位移)
   // rpy的offset直接采用imu的rpy偏差值
-  guess_pose_imu_odom.x = previous_pose.x + offset_imu_odom_x;
+/*  guess_pose_imu_odom.x = previous_pose.x + offset_imu_odom_x;
   guess_pose_imu_odom.y = previous_pose.y + offset_imu_odom_y;
   guess_pose_imu_odom.z = previous_pose.z + offset_imu_odom_z;
   guess_pose_imu_odom.roll = previous_pose.roll + offset_imu_odom_roll;
   guess_pose_imu_odom.pitch = previous_pose.pitch + offset_imu_odom_pitch;
-  guess_pose_imu_odom.yaw = previous_pose.yaw + offset_imu_odom_yaw;
+  guess_pose_imu_odom.yaw = previous_pose.yaw + offset_imu_odom_yaw;*/
 
+  guess_pose_imu_odom.x = previous_pose.x + offset_imu_odom_pose.x;
+  guess_pose_imu_odom.y = previous_pose.y + offset_imu_odom_pose.y;
+  guess_pose_imu_odom.z = previous_pose.z + offset_imu_odom_pose.z;
+  guess_pose_imu_odom.roll = previous_pose.roll + offset_imu_odom_pose.roll;
+  guess_pose_imu_odom.pitch = previous_pose.pitch + offset_imu_odom_pose.pitch;
+  guess_pose_imu_odom.yaw = previous_pose.yaw + offset_imu_odom_pose.yaw;
+
+  guess_pose_odom.updateT();
   previous_time = current_time;
 }
 
@@ -817,24 +628,40 @@ void LidarMapping::imu_calc(ros::Time current_time) {
   // end1
 
   // imu计算xyz方向上的偏移,初始速度用的imu_x为slam计算获得,后面再加上考虑加速度以及时间参数,获得较为准确的距离偏移
-  offset_imu_x += current_velocity_imu_x * diff_time + accX * diff_time * diff_time / 2.0;
+/*  offset_imu_x += current_velocity_imu_x * diff_time + accX * diff_time * diff_time / 2.0;
   offset_imu_y += current_velocity_imu_y * diff_time + accY * diff_time * diff_time / 2.0;
-  offset_imu_z += current_velocity_imu_z * diff_time + accZ * diff_time * diff_time / 2.0;
+  offset_imu_z += current_velocity_imu_z * diff_time + accZ * diff_time * diff_time / 2.0; */
+
+  offset_imu_pose.x += current_velocity_imu_x * diff_time + accX * diff_time * diff_time / 2.0;
+  offset_imu_pose.y += current_velocity_imu_y * diff_time + accY * diff_time * diff_time / 2.0;
+  offset_imu_pose.z += current_velocity_imu_z * diff_time + accZ * diff_time * diff_time / 2.0;
 
   current_velocity_imu_x += accX * diff_time;  // imu的速度值会通过slam进行修正,以避免累计误差
   current_velocity_imu_y += accY * diff_time;  // 或者说imu计算时所用的速度并不是用imu得到的,而是用slam得到的
   current_velocity_imu_z += accZ * diff_time;    // imu所提供的参数,主要用来计算角度上的偏移,以及加速度导致的距离上的偏移!@
 
-  offset_imu_roll += diff_imu_roll;
+/*  offset_imu_roll += diff_imu_roll;
   offset_imu_pitch += diff_imu_pitch;
-  offset_imu_yaw += diff_imu_yaw;
+  offset_imu_yaw += diff_imu_yaw;*/
 
-  guess_pose_imu.x = previous_pose.x + offset_imu_x;
+  offset_imu_pose.roll += diff_imu_roll;
+  offset_imu_pose.pitch += diff_imu_pitch;
+  offset_imu_pose.yaw += diff_imu_yaw;
+
+/*  guess_pose_imu.x = previous_pose.x + offset_imu_x;
   guess_pose_imu.y = previous_pose.y + offset_imu_y;
   guess_pose_imu.z = previous_pose.z + offset_imu_z;
   guess_pose_imu.roll = previous_pose.roll + offset_imu_roll;
   guess_pose_imu.pitch = previous_pose.pitch + offset_imu_pitch;
-  guess_pose_imu.yaw = previous_pose.yaw + offset_imu_yaw;
+  guess_pose_imu.yaw = previous_pose.yaw + offset_imu_yaw;*/
+
+  guess_pose_imu.x = previous_pose.x + offset_imu_pose.x;
+  guess_pose_imu.y = previous_pose.y + offset_imu_pose.y;
+  guess_pose_imu.z = previous_pose.z + offset_imu_pose.z;
+  guess_pose_imu.roll = previous_pose.roll + offset_imu_pose.roll;
+  guess_pose_imu.pitch = previous_pose.pitch + offset_imu_pose.pitch;
+  guess_pose_imu.yaw = previous_pose.yaw + offset_imu_pose.yaw;
+  guess_pose.updateT();
 
   previous_time = current_time;
 }
@@ -852,20 +679,29 @@ void LidarMapping::odom_calc(ros::Time current_time) {
   current_pose_odom.yaw += diff_odom_yaw;
 
   double diff_distance = odom.twist.twist.linear.x * diff_time;
-  offset_odom_x += diff_distance * cos(-current_pose_odom.pitch) * cos(current_pose_odom.yaw);
+  /*offset_odom_x += diff_distance * cos(-current_pose_odom.pitch) * cos(current_pose_odom.yaw);
   offset_odom_y += diff_distance * cos(-current_pose_odom.pitch) * sin(current_pose_odom.yaw);
   offset_odom_z += diff_distance * sin(-current_pose_odom.pitch);
 
   offset_odom_roll += diff_odom_roll;
   offset_odom_pitch += diff_odom_pitch;
-  offset_odom_yaw += diff_odom_yaw;
+  offset_odom_yaw += diff_odom_yaw;*/
 
-  guess_pose_odom.x = previous_pose.x + offset_odom_x;
-  guess_pose_odom.y = previous_pose.y + offset_odom_y;
-  guess_pose_odom.z = previous_pose.z + offset_odom_z;
-  guess_pose_odom.roll = previous_pose.roll + offset_odom_roll;
-  guess_pose_odom.pitch = previous_pose.pitch + offset_odom_pitch;
-  guess_pose_odom.yaw = previous_pose.yaw + offset_odom_yaw;
+  offset_odom_pose.x += diff_distance * cos(-current_pose_odom.pitch) * cos(current_pose_odom.yaw);
+  offset_odom_pose.y += diff_distance * cos(-current_pose_odom.pitch) * sin(current_pose_odom.yaw);
+  offset_odom_pose.z += diff_distance * sin(-current_pose_odom.pitch);
+
+  offset_odom_pose.roll += diff_odom_roll;
+  offset_odom_pose.pitch += diff_odom_pitch;
+  offset_odom_pose.yaw += diff_odom_yaw;
+
+  guess_pose_odom.x = previous_pose.x + offset_odom_pose.x;
+  guess_pose_odom.y = previous_pose.y + offset_odom_pose.y;
+  guess_pose_odom.z = previous_pose.z + offset_odom_pose.z;
+  guess_pose_odom.roll = previous_pose.roll + offset_odom_pose.roll;
+  guess_pose_odom.pitch = previous_pose.pitch + offset_odom_pose.pitch;
+  guess_pose_odom.yaw = previous_pose.yaw + offset_odom_pose.yaw;
+  guess_pose_odom.updateT();
 
   previous_time = current_time;
 }
@@ -894,7 +730,6 @@ void LidarMapping::imuUpSideDown(const sensor_msgs::Imu::Ptr input) {
 }
 
 void LidarMapping::imu_info(const sensor_msgs::Imu &input) {
-
   const ros::Time current_time = input.header.stamp;
   static ros::Time previous_time = current_time;
   const double diff_time = (current_time - previous_time).toSec();
@@ -941,6 +776,99 @@ void LidarMapping::imu_info(const sensor_msgs::Imu &input) {
 
 void LidarMapping::odom_info(const nav_msgs::Odometry &input) {
   odom_calc(input.header.stamp);
+}
+
+void LidarMapping::publish_cloud() {
+
+  // publish odom
+  if (current_odom_pub.getNumSubscribers()) {
+    nav_msgs::Odometry odom;
+    odom.header.stamp = current_scan_time;
+    odom.header.frame_id = "map";
+
+    odom.pose.pose.position.x = current_pose.x;
+    odom.pose.pose.position.y = current_pose.y;
+    odom.pose.pose.position.z = current_pose.z;
+
+    odom.pose.pose.orientation.x = q.x();
+    odom.pose.pose.orientation.y = q.y();
+    odom.pose.pose.orientation.z = q.z();
+    odom.pose.pose.orientation.w = q.w();
+
+    odom.child_frame_id = "base_link";
+    odom.twist.twist.linear.x = current_velocity_x;
+    odom.twist.twist.linear.y = current_velocity_y;
+    odom.twist.twist.angular.z = current_velocity_z;
+    current_odom_pub.publish(odom);
+  }
+  // 发布关键帧位姿
+  if (keyposes_pub.getNumSubscribers() > 0) {
+    sensor_msgs::PointCloud2 msg;
+    pcl::toROSMsg(*cloud_keyposes_3d_, msg);
+    msg.header.frame_id = "map";
+    msg.header.stamp = ros::Time::now();
+    keyposes_pub.publish(msg);
+  }
+
+  // 实时的点云也发布
+  if (current_points_pub.getNumSubscribers() > 0) {
+    sensor_msgs::PointCloud2::Ptr pointcloud_current_ptr(new sensor_msgs::PointCloud2);
+    pcl::toROSMsg(*transformed_scan_ptr, *pointcloud_current_ptr);
+    pointcloud_current_ptr->header.frame_id = "map";
+    current_points_pub.publish(*pointcloud_current_ptr);
+  }
+
+  // 发布globalmap
+  pcl::PointCloud<pcl::PointXYZI>::Ptr target_cloud(new pcl::PointCloud<pcl::PointXYZI>());
+  pcl::PointCloud<pcl::PointXYZI>::Ptr local_cloud(new pcl::PointCloud<pcl::PointXYZI>());
+  pcl::copyPointCloud(globalmap, *target_cloud);
+  pcl::copyPointCloud(localmap, *local_cloud);
+  downSizeFilterGlobalMap.setInputCloud(target_cloud);
+  downSizeFilterGlobalMap.filter(*target_cloud);
+  downSizeFilterLocalmap.setInputCloud(local_cloud);
+  downSizeFilterLocalmap.filter(*local_cloud);
+
+  if (ndt_map_pub.getNumSubscribers() > 0) {
+    sensor_msgs::PointCloud2::Ptr map_msg_ptr(new sensor_msgs::PointCloud2);
+    pcl::toROSMsg(*target_cloud, *map_msg_ptr);
+    map_msg_ptr->header.frame_id = "map";
+    ndt_map_pub.publish(*map_msg_ptr);
+  }
+  target_cloud->clear();
+  if (local_map_pub.getNumSubscribers() > 0) {
+    sensor_msgs::PointCloud2::Ptr localmap_msg_ptr(new sensor_msgs::PointCloud2);
+    pcl::toROSMsg(*local_cloud, *localmap_msg_ptr);
+    localmap_msg_ptr->header.frame_id = "map";
+    local_map_pub.publish(*localmap_msg_ptr);
+  }
+  local_cloud->clear();
+
+
+/*  // 发布全局地图，非最终地图，只是里程计关键帧拼接而成的
+  if (pub_globalmap_.getNumSubscribers() > 0) {
+    int num_points = 0;
+    sensor_msgs::PointCloud2 msg;
+    pcl::PointCloud<PointT>::Ptr globalmap_ptr(new pcl::PointCloud<PointT>());
+    Eigen::Matrix4f T(Eigen::Matrix4f::Identity());
+    // 把关键帧拼接而成，这里关键帧及其对应的位姿都存储好了
+    for (int i = 0; i < cloud_keyframes.size(); ++i) {
+      pcl::PointCloud<PointT>::Ptr tmp(new pcl::PointCloud<PointT>());
+      tmp = transformPointCloud(cloud_keyframes[i], cloud_keyposes_6d_->points[i]);
+      *globalmap_ptr += *tmp;
+      num_points += tmp->points.size();
+    }
+
+    // downsample visualized points
+    downSizeFilterGlobalMapKeyFrames.setInputCloud(globalmap_ptr);
+    downSizeFilterGlobalMapKeyFrames.filter(*globalmap_ptr);
+
+    pcl::toROSMsg(*globalmap_ptr, msg);
+    msg.header.frame_id = "map";
+    msg.header.stamp = ros::Time::now();
+    pub_globalmap_.publish(msg);
+    ROS_INFO("Map Size: %d points", num_points);
+  }*/
+
 }
 
 void LidarMapping::save_map() {

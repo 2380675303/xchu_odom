@@ -37,7 +37,7 @@
 
 using PointT = pcl::PointXYZI;
 
-struct pose {
+struct Pose {
   double x;
   double y;
   double z;
@@ -45,20 +45,84 @@ struct pose {
   double pitch;
   double yaw;
 
+  Eigen::Matrix4f t;
+
+  Pose() {
+    init();
+  }
+
   void init() {
     x = y = z = 0.0;
     roll = pitch = yaw = 0.0;
+    t.setIdentity();
   }
 
-  Eigen::Matrix4d rotateRPY() {
+/*  Eigen::Matrix4d rotateRPY() {
     Eigen::Translation3d tf_trans(x, y, z);
     Eigen::AngleAxisd rot_x(roll, Eigen::Vector3d::UnitX());
     Eigen::AngleAxisd rot_y(pitch, Eigen::Vector3d::UnitY());
     Eigen::AngleAxisd rot_z(yaw, Eigen::Vector3d::UnitZ());
     Eigen::Matrix4d mat = (tf_trans * rot_z * rot_y * rot_x).matrix();
     return mat;
+  }*/
+
+
+  void updateT() {
+    t.setIdentity();
+    Eigen::Translation3d tf_trans(x, y, z);
+    Eigen::AngleAxisd rot_x(roll, Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd rot_y(pitch, Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd rot_z(yaw, Eigen::Vector3d::UnitZ());
+    t = (tf_trans * rot_z * rot_y * rot_x).matrix().cast<float>();
   }
+
+  void updatePose(Eigen::Matrix4f &tmp_t) {
+    Eigen::Matrix3f r = tmp_t.block<3, 3>(0, 0).matrix();
+    x = tmp_t(0, 3);
+    y = tmp_t(1, 3);
+    z = tmp_t(2, 3);
+
+/*    Eigen::Vector3f angle = r.eulerAngles(2, 1, 0);
+    yaw = angle.transpose()(0);
+    pitch = angle.transpose()(1);
+    roll = angle.transpose()(2);*/
+
+
+    tf::Matrix3x3 mat;  // 用以根据齐次坐标下的旋转变换,来求rpy转换角度
+    mat.setValue(static_cast<double>(tmp_t(0, 0)), static_cast<double>(tmp_t(0, 1)),
+                 static_cast<double>(tmp_t(0, 2)), static_cast<double>(tmp_t(1, 0)),
+                 static_cast<double>(tmp_t(1, 1)), static_cast<double>(tmp_t(1, 2)),
+                 static_cast<double>(tmp_t(2, 0)), static_cast<double>(tmp_t(2, 1)),
+                 static_cast<double>(tmp_t(2, 2)));
+    mat.getRPY(roll, pitch, yaw, 1);
+
+    t = tmp_t.matrix();
+  }
+
 };
+
+struct PointXYZIRPYT {
+  PCL_ADD_POINT4D
+
+  PCL_ADD_INTENSITY;
+  float roll;
+  float pitch;
+  float yaw;
+  double time;
+
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+} EIGEN_ALIGN16;
+
+POINT_CLOUD_REGISTER_POINT_STRUCT(PointXYZIRPYT,
+                                  (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(float, roll,
+                                                                                                       roll)(float,
+                                                                                                             pitch,
+                                                                                                             pitch)(
+                                      float, yaw, yaw)(double, time, time))
+
+using PointTPose = PointXYZIRPYT;
+
+
 
 enum class MethodType {
   use_pcl = 0,
@@ -103,6 +167,21 @@ class LidarMapping {
     return diff_rad;
   }
 
+  inline pcl::PointCloud<PointT>::Ptr
+  transformPointCloud(const pcl::PointCloud<PointT>::ConstPtr cloud_in, const PointTPose &trans) {
+    Eigen::Matrix4f this_transformation(Eigen::Matrix4f::Identity());
+    this_transformation.block<3, 3>(0, 0) = (Eigen::AngleAxisf(trans.yaw, Eigen::Vector3f::UnitZ()) *
+        Eigen::AngleAxisf(trans.pitch, Eigen::Vector3f::UnitY()) *
+        Eigen::AngleAxisf(trans.roll, Eigen::Vector3f::UnitX()))
+        .toRotationMatrix();
+    this_transformation(0, 3) = trans.x;
+    this_transformation(1, 3) = trans.y;
+    this_transformation(2, 3) = trans.z;
+    pcl::PointCloud<PointT>::Ptr tf_cloud(new pcl::PointCloud<PointT>());
+    pcl::transformPointCloud(*cloud_in, *tf_cloud, this_transformation);
+    return tf_cloud;
+  }
+
   /**
    * 程序主流程
    */
@@ -122,6 +201,11 @@ class LidarMapping {
    */
   void save_map();
 
+  void publish_cloud();
+
+  bool save_keyframes();
+ private:
+
   void imu_callback(const sensor_msgs::Imu::Ptr &input);
 
   void odom_callback(const nav_msgs::Odometry::ConstPtr &input);
@@ -140,15 +224,14 @@ class LidarMapping {
 
   void imu_info(const sensor_msgs::Imu &input);
 
- private:
-  pose previous_pose, guess_pose, guess_pose_imu, guess_pose_odom, guess_pose_imu_odom;
-  pose current_pose, current_pose_imu, current_pose_odom, current_pose_imu_odom;
-  pose ndt_pose, localizer_pose;
-  pose added_pose;  //  added_pose记录点云加入地图时候的位置         // 初始设为0即可,因为第一帧如论如何也要加入地图的
 
-  Eigen::Matrix4f pre_pose_, guess_pose_, guess_pose_imu_, guess_pose_odom_, guess_pose_imu_odom_;
-  Eigen::Matrix4f current_pose_, current_pose_imu_, current_pose_odom_, current_pose_imu_odom_;
-  Eigen::Matrix4f ndt_pose_, localizer_pose_, added_pose_;
+  Pose previous_pose, guess_pose, guess_pose_imu, guess_pose_odom, guess_pose_imu_odom;
+  Pose current_pose, current_pose_imu, current_pose_odom, current_pose_imu_odom;
+  Pose localizer_pose, added_pose;  //  added_pose记录点云加入地图时候的位置         // 初始设为0即可,因为第一帧如论如何也要加入地图的
+
+  // 定义各种差异值(两次采集数据之间的差异,包括点云位置差异,imu差异,odom差异,imu-odom差异)
+  Pose diff_pose, offset_imu_pose, offset_odom_pose, offset_imu_odom_pose;
+  double diff = 0.0;
 
   ros::Time current_scan_time;
   ros::Time previous_scan_time;
@@ -158,24 +241,16 @@ class LidarMapping {
   ros::Publisher ndt_map_pub;        // 地图发布
   ros::Publisher local_map_pub;        // 地图发布
   ros::Publisher current_odom_pub, keyposes_pub;        // 地图发布
-  //ros::Publisher current_pose_pub;   // 位置发布
-  //ros::Publisher guess_pose_linaer_pub;  // TODO:这是个啥发布????
   ros::Publisher current_points_pub;  // TODO:这是个啥发布????
-
 
   ros::Subscriber points_sub;
   ros::Subscriber imu_sub;
   ros::Subscriber odom_sub;
-  geometry_msgs::PoseStamped current_pose_msg, guess_pose_msg;
-
-  ros::Publisher ndt_stat_pub;
-  std_msgs::Bool ndt_stat_msg;  // 确认是否是ndt的第一帧图像 bool类型
 
   // 设置变量,用以接受ndt配准后的参数
   double fitness_score;
   bool has_converged;
   int final_num_iteration;
-  double transformation_probability;
 
   // 设置变量,用以接受imu和odom消息
   sensor_msgs::Imu imu;
@@ -187,19 +262,10 @@ class LidarMapping {
 
   MethodType _method_type = MethodType::use_cpu;
 
-  // 定义各种差异值(两次采集数据之间的差异,包括点云位置差异,imu差异,odom差异,imu-odom差异)
-  double diff;
-  double diff_x, diff_y, diff_z, diff_yaw;  // current_pose - previous_pose // 定义两帧点云差异值 --以确定是否更新点云等
-  double offset_imu_x, offset_imu_y, offset_imu_z, offset_imu_roll, offset_imu_pitch, offset_imu_yaw;
-  double offset_odom_x, offset_odom_y, offset_odom_z, offset_odom_roll, offset_odom_pitch, offset_odom_yaw;
-  double offset_imu_odom_x, offset_imu_odom_y, offset_imu_odom_z, offset_imu_odom_roll, offset_imu_odom_pitch,
-      offset_imu_odom_yaw;
-
   // 定义速度值 --包括实际速度值,和imu取到的速度值
   double current_velocity_x;
   double current_velocity_y;
   double current_velocity_z;
-
   double current_velocity_imu_x;
   double current_velocity_imu_y;
   double current_velocity_imu_z;
@@ -209,16 +275,6 @@ class LidarMapping {
 
   pcl::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI> pcl_ndt;
   cpu::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI> cpu_ndt;  // cpu方式  --可以直接调用吗??可以
-#ifdef CUDA_FOUND
-  gpu::GNormalDistributionsTransform gpu_ndt;
-  // TODO:此处增加共享内存方式的gpu_ndt_ptr
-   std::shared_ptr<gpu::GNormalDistributionsTransform> gpu_ndt = std::make_shared<gpu::GNormalDistributionsTransform>();
-#endif
-//#ifdef USE_PCL_OPENMP  // 待查证使用方法
-//		static pcl_omp::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI> omp_ndt;
-//#endif
-  //pcl_omp::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI> omp_ndt;
-//  pclomp::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI>::Ptr omp_ndt;
 
   // Default values  // 公共ndt参数设置
   int max_iter;        // Maximum iterations
@@ -266,11 +322,21 @@ class LidarMapping {
   pcl::VoxelGrid<pcl::PointXYZI> downSizeFilterGlobalMap; // for global map visualization
   pcl::VoxelGrid<pcl::PointXYZI> downSizeFilterKeyFrames; // for global map visualization
   pcl::VoxelGrid<pcl::PointXYZI> downSizeFilterLocalmap; // for global map visualization
-  pcl::VoxelGrid<PointT> downSizeFilterSource;
   //pcl::VoxelGrid<PointT> downSizeFilterHistoryKeyframes;
 
   pcl::PointCloud<PointT>::Ptr cloud_keyposes_3d_;
 
+  pcl::PointCloud<pcl::PointXYZI>::Ptr filtered_scan_ptr;
+  pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_scan_ptr;
+
+  // global pose and q
+  tf::Quaternion q;
+  Eigen::Matrix4f t_localizer;
+  Eigen::Matrix4f t_base_link;
+
+  double keyframe_dist = 0.3;
+  pcl::PointCloud<PointTPose>::Ptr cloud_keyposes_6d_;
+  std::vector<pcl::PointCloud<PointT>::Ptr> cloud_keyframes;
 };
 
 #endif //NDT_MAPPING_LIDARMAPPING_H
