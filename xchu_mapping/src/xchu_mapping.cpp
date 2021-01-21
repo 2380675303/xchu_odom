@@ -112,7 +112,9 @@ void LidarMapping::param_initial(ros::NodeHandle &privateHandle) {
     cpu_ndt.setStepSize(step_size);
     cpu_ndt.setResolution(ndt_res);
     cpu_ndt.setMaximumIterations(max_iter);
-  } else if (_method_type == MethodType::use_omp) {
+  }
+#ifndef NO_OMP
+  else if (_method_type == MethodType::use_omp) {
     std::cout << ">> Use OMP NDT <<" << std::endl;
     pclomp::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI>::Ptr ndt(
         new pclomp::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI>());
@@ -124,7 +126,9 @@ void LidarMapping::param_initial(ros::NodeHandle &privateHandle) {
     ndt->setMaximumIterations(max_iter);
     // 注意：此处设置ndt参数之后才能赋值给registration,否则后面无法使用getFinalScore函数！
     omp_ndt = ndt;
-  } else {
+  }
+#endif
+  else {
     ROS_ERROR("Please Define _method_type to conduct NDT");
   }
 
