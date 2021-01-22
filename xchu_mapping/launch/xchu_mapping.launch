@@ -45,7 +45,7 @@
         <param name="imu_topic" value="/trunk_info/imu" type="str"/>
         <param name="odom_topic" value="/golfcar/odom" type="str"/>
         <!-- /top/rslidar_points  /vlp16_0/velodyne_points /kitti/velo/pointcloud -->
-        <param name="lidar_topic" value="/vlp16_0/velodyne_points" type="str"/>
+        <param name="lidar_topic" value="/lslidar_point_cloud" type="str"/>
 
         <param name="ndt_method_type" value="3" type="int"/> <!--pcl:0,cpu:1,gpu:2,omp:3,gpu_ptr:4-->
         <param name="incremental_voxel_update" value="true" type="bool"/>

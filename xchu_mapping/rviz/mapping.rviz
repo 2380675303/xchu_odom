@@ -7,7 +7,6 @@ Panels:
         - /Global Options1
         - /Status1
         - /global_map1
-        - /localmap1
         - /Odometry1/Shape1
         - /Odometry1/Covariance1
       Splitter Ratio: 0.524017453
@@ -40,7 +39,7 @@ Visualization Manager:
       Cell Size: 1
       Class: rviz/Grid
       Color: 160; 160; 164
-      Enabled: false
+      Enabled: true
       Line Style:
         Line Width: 0.0299999993
         Value: Lines
@@ -53,7 +52,7 @@ Visualization Manager:
       Plane: XY
       Plane Cell Count: 10
       Reference Frame: <Fixed Frame>
-      Value: false
+      Value: true
     - Alpha: 1
       Class: rviz/RobotModel
       Collision Enabled: false
@@ -147,8 +146,8 @@ Visualization Manager:
     - Alpha: 0.200000003
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 21.6330376
-        Min Value: -1.00409687
+        Max Value: 13.683773
+        Min Value: -2.89391661
         Value: true
       Axis: Z
       Channel Name: intensity
@@ -191,7 +190,7 @@ Visualization Manager:
           Scale: 1
           Value: true
         Value: true
-      Enabled: false
+      Enabled: true
       Keep: 10000
       Name: Odometry
       Position Tolerance: 0.100000001
@@ -207,7 +206,7 @@ Visualization Manager:
         Value: Arrow
       Topic: /current_odom
       Unreliable: false
-      Value: false
+      Value: true
     - Class: rviz/Image
       Enabled: false
       Image Topic: /kitti/camera_color_right/image_raw
@@ -235,7 +234,7 @@ Visualization Manager:
       Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
-      Max Intensity: 152
+      Max Intensity: 0
       Min Color: 0; 0; 0
       Min Intensity: 0
       Name: keypose
@@ -275,16 +274,16 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/ThirdPersonFollower
-      Distance: 150.728638
+      Distance: 48.8711205
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.0599999987
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -23.8630562
-        Y: -14.3523121
-        Z: -2.86102295e-06
+        X: 0
+        Y: 0
+        Z: 0
       Focal Shape Fixed Size: false
       Focal Shape Size: 0.0500000007
       Invert Z Axis: false
@@ -293,7 +292,7 @@ Visualization Manager:
       Pitch: 1.56979632
       Target Frame: base_link
       Value: ThirdPersonFollower (rviz)
-      Yaw: 4.46811676
+      Yaw: 2.41539884
     Saved: ~
 Window Geometry:
   Displays:

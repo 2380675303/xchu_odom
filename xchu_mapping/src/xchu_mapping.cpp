@@ -199,7 +199,7 @@ void LidarMapping::run() {
         }
         imu_data.erase(imu_data.begin(), imu_iter);
       }
-      //std::cout << "imu buffer size : " << imu_data.size() << std::endl;
+      // std::cout << "imu buffer size : " << imu_data.size() << std::endl;
 
       // 取queue里面的第一条数据
       if (tmp.empty()) {

@@ -1,7 +1,7 @@
 
 
-#ifndef NDT_MAPPING_LIDARMAPPING_H
-#define NDT_MAPPING_LIDARMAPPING_H
+#ifndef XCHU_MAPPING_LIDARMAPPING_H
+#define XCHU_MAPPING_LIDARMAPPING_H
 
 #define OUTPUT  // define OUTPUT if you want to log postition.txt
 
@@ -29,8 +29,8 @@
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 #include <pcl_conversions/pcl_conversions.h>
-
 #include <pcl/registration/ndt.h>
+
 #include <ndt_cpu/NormalDistributionsTransform.h>
 #include <pclomp/ndt_omp.h>
 #include "omp.h"
